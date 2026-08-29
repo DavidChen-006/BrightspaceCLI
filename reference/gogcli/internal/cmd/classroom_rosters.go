@@ -1,0 +1,414 @@
+package cmd
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	"google.golang.org/api/classroom/v1"
+
+	"github.com/openclaw/gogcli/internal/outfmt"
+	"github.com/openclaw/gogcli/internal/ui"
+)
+
+type ClassroomStudentsCmd struct {
+	List   ClassroomStudentsListCmd   `cmd:"" default:"withargs" aliases:"ls" help:"List students"`
+	Get    ClassroomStudentsGetCmd    `cmd:"" aliases:"info,show" help:"Get a student"`
+	Add    ClassroomStudentsAddCmd    `cmd:"" aliases:"create,new" help:"Add a student"`
+	Remove ClassroomStudentsRemoveCmd `cmd:"" aliases:"delete,rm,del" help:"Remove a student"`
+}
+
+type ClassroomStudentsListCmd struct {
+	CourseID  string `arg:"" name:"courseId" help:"Course ID or alias"`
+	Max       int64  `name:"max" aliases:"limit" help:"Max results" default:"100"`
+	Page      string `name:"page" aliases:"cursor" help:"Page token"`
+	All       bool   `name:"all" aliases:"all-pages,allpages" help:"Fetch all pages"`
+	FailEmpty bool   `name:"fail-empty" aliases:"non-empty,require-results" help:"Exit with code 3 if no results"`
+}
+
+func (c *ClassroomStudentsListCmd) Run(ctx context.Context, flags *RootFlags) error {
+	return runClassroomPagedList(ctx, flags, classroomPagedListOptions[classroom.Student]{
+		parentName: "courseId", parentID: c.CourseID, max: c.Max, page: c.Page, all: c.All,
+		failEmpty: c.FailEmpty, jsonKey: "students", emptyMessage: "No students", columns: classroomStudentColumns(),
+		fetch: fetchClassroomStudentPage,
+	})
+}
+
+type ClassroomStudentsGetCmd struct {
+	CourseID string `arg:"" name:"courseId" help:"Course ID or alias"`
+	UserID   string `arg:"" name:"userId" help:"Student user ID or email"`
+}
+
+func (c *ClassroomStudentsGetCmd) Run(ctx context.Context, flags *RootFlags) error {
+	u := ui.FromContext(ctx)
+	account, err := requireAccount(flags)
+	if err != nil {
+		return err
+	}
+	courseID := strings.TrimSpace(c.CourseID)
+	userID := strings.TrimSpace(c.UserID)
+	if courseID == "" {
+		return usage("empty courseId")
+	}
+	if userID == "" {
+		return usage("empty userId")
+	}
+
+	svc, err := classroomService(ctx, account)
+	if err != nil {
+		return wrapClassroomError(err)
+	}
+
+	student, err := svc.Courses.Students.Get(courseID, userID).Context(ctx).Do()
+	if err != nil {
+		return wrapClassroomError(err)
+	}
+
+	if outfmt.IsJSON(ctx) {
+		return outfmt.WriteJSON(ctx, stdoutWriter(ctx), map[string]any{"student": student})
+	}
+
+	u.Out().Linef("user_id\t%s", student.UserId)
+	u.Out().Linef("email\t%s", profileEmail(student.Profile))
+	u.Out().Linef("name\t%s", profileName(student.Profile))
+	if student.StudentWorkFolder != nil {
+		u.Out().Linef("work_folder\t%s", student.StudentWorkFolder.Id)
+	}
+	return nil
+}
+
+type ClassroomStudentsAddCmd struct {
+	CourseID       string `arg:"" name:"courseId" help:"Course ID or alias"`
+	UserID         string `arg:"" name:"userId" help:"Student user ID or email"`
+	EnrollmentCode string `name:"enrollment-code" help:"Enrollment code"`
+}
+
+func (c *ClassroomStudentsAddCmd) Run(ctx context.Context, flags *RootFlags) error {
+	u := ui.FromContext(ctx)
+	courseID := strings.TrimSpace(c.CourseID)
+	userID := strings.TrimSpace(c.UserID)
+	if courseID == "" {
+		return usage("empty courseId")
+	}
+	if userID == "" {
+		return usage("empty userId")
+	}
+
+	if err := dryRunExit(ctx, flags, "classroom.students.add", map[string]any{
+		"course_id":       courseID,
+		"user_id":         userID,
+		"enrollment_code": strings.TrimSpace(c.EnrollmentCode),
+	}); err != nil {
+		return err
+	}
+
+	account, err := requireAccount(flags)
+	if err != nil {
+		return err
+	}
+
+	svc, err := classroomService(ctx, account)
+	if err != nil {
+		return wrapClassroomError(err)
+	}
+
+	student := &classroom.Student{UserId: userID}
+	call := svc.Courses.Students.Create(courseID, student).Context(ctx)
+	if code := strings.TrimSpace(c.EnrollmentCode); code != "" {
+		call.EnrollmentCode(code)
+	}
+	created, err := call.Do()
+	if err != nil {
+		return wrapClassroomError(err)
+	}
+
+	if outfmt.IsJSON(ctx) {
+		return outfmt.WriteJSON(ctx, stdoutWriter(ctx), map[string]any{"student": created})
+	}
+	u.Out().Linef("user_id\t%s", created.UserId)
+	u.Out().Linef("email\t%s", profileEmail(created.Profile))
+	u.Out().Linef("name\t%s", profileName(created.Profile))
+	return nil
+}
+
+type ClassroomStudentsRemoveCmd struct {
+	CourseID string `arg:"" name:"courseId" help:"Course ID or alias"`
+	UserID   string `arg:"" name:"userId" help:"Student user ID or email"`
+}
+
+func (c *ClassroomStudentsRemoveCmd) Run(ctx context.Context, flags *RootFlags) error {
+	return runClassroomDelete(ctx, flags, c.CourseID, c.UserID, classroomDeleteOperation{
+		op: "classroom.students.remove", parentName: "courseId", parentPayloadKey: "course_id", parentResultKey: "courseId",
+		childName: "userId", childPayloadKey: "user_id", childResultKey: "userId", successResultKey: "removed",
+		action: func(courseID, userID string) string {
+			return fmt.Sprintf("remove student %s from %s", userID, courseID)
+		},
+		delete: func(svc *classroom.Service, courseID, userID string) error {
+			_, err := svc.Courses.Students.Delete(courseID, userID).Context(ctx).Do()
+			return err
+		},
+	})
+}
+
+type ClassroomTeachersCmd struct {
+	List   ClassroomTeachersListCmd   `cmd:"" default:"withargs" aliases:"ls" help:"List teachers"`
+	Get    ClassroomTeachersGetCmd    `cmd:"" aliases:"info,show" help:"Get a teacher"`
+	Add    ClassroomTeachersAddCmd    `cmd:"" aliases:"create,new" help:"Add a teacher"`
+	Remove ClassroomTeachersRemoveCmd `cmd:"" aliases:"delete,rm,del" help:"Remove a teacher"`
+}
+
+type ClassroomTeachersListCmd struct {
+	CourseID  string `arg:"" name:"courseId" help:"Course ID or alias"`
+	Max       int64  `name:"max" aliases:"limit" help:"Max results" default:"100"`
+	Page      string `name:"page" aliases:"cursor" help:"Page token"`
+	All       bool   `name:"all" aliases:"all-pages,allpages" help:"Fetch all pages"`
+	FailEmpty bool   `name:"fail-empty" aliases:"non-empty,require-results" help:"Exit with code 3 if no results"`
+}
+
+func (c *ClassroomTeachersListCmd) Run(ctx context.Context, flags *RootFlags) error {
+	return runClassroomPagedList(ctx, flags, classroomPagedListOptions[classroom.Teacher]{
+		parentName: "courseId", parentID: c.CourseID, max: c.Max, page: c.Page, all: c.All,
+		failEmpty: c.FailEmpty, jsonKey: "teachers", emptyMessage: "No teachers", columns: classroomTeacherColumns(),
+		fetch: fetchClassroomTeacherPage,
+	})
+}
+
+type ClassroomTeachersGetCmd struct {
+	CourseID string `arg:"" name:"courseId" help:"Course ID or alias"`
+	UserID   string `arg:"" name:"userId" help:"Teacher user ID or email"`
+}
+
+func (c *ClassroomTeachersGetCmd) Run(ctx context.Context, flags *RootFlags) error {
+	u := ui.FromContext(ctx)
+	account, err := requireAccount(flags)
+	if err != nil {
+		return err
+	}
+	courseID := strings.TrimSpace(c.CourseID)
+	userID := strings.TrimSpace(c.UserID)
+	if courseID == "" {
+		return usage("empty courseId")
+	}
+	if userID == "" {
+		return usage("empty userId")
+	}
+
+	svc, err := classroomService(ctx, account)
+	if err != nil {
+		return wrapClassroomError(err)
+	}
+
+	teacher, err := svc.Courses.Teachers.Get(courseID, userID).Context(ctx).Do()
+	if err != nil {
+		return wrapClassroomError(err)
+	}
+
+	if outfmt.IsJSON(ctx) {
+		return outfmt.WriteJSON(ctx, stdoutWriter(ctx), map[string]any{"teacher": teacher})
+	}
+
+	u.Out().Linef("user_id\t%s", teacher.UserId)
+	u.Out().Linef("email\t%s", profileEmail(teacher.Profile))
+	u.Out().Linef("name\t%s", profileName(teacher.Profile))
+	return nil
+}
+
+type ClassroomTeachersAddCmd struct {
+	CourseID string `arg:"" name:"courseId" help:"Course ID or alias"`
+	UserID   string `arg:"" name:"userId" help:"Teacher user ID or email"`
+}
+
+func (c *ClassroomTeachersAddCmd) Run(ctx context.Context, flags *RootFlags) error {
+	u := ui.FromContext(ctx)
+	courseID := strings.TrimSpace(c.CourseID)
+	userID := strings.TrimSpace(c.UserID)
+	if courseID == "" {
+		return usage("empty courseId")
+	}
+	if userID == "" {
+		return usage("empty userId")
+	}
+
+	if err := dryRunExit(ctx, flags, "classroom.teachers.add", map[string]any{
+		"course_id": courseID,
+		"user_id":   userID,
+	}); err != nil {
+		return err
+	}
+
+	account, err := requireAccount(flags)
+	if err != nil {
+		return err
+	}
+
+	svc, err := classroomService(ctx, account)
+	if err != nil {
+		return wrapClassroomError(err)
+	}
+
+	teacher := &classroom.Teacher{UserId: userID}
+	created, err := svc.Courses.Teachers.Create(courseID, teacher).Context(ctx).Do()
+	if err != nil {
+		return wrapClassroomError(err)
+	}
+
+	if outfmt.IsJSON(ctx) {
+		return outfmt.WriteJSON(ctx, stdoutWriter(ctx), map[string]any{"teacher": created})
+	}
+	u.Out().Linef("user_id\t%s", created.UserId)
+	u.Out().Linef("email\t%s", profileEmail(created.Profile))
+	u.Out().Linef("name\t%s", profileName(created.Profile))
+	return nil
+}
+
+type ClassroomTeachersRemoveCmd struct {
+	CourseID string `arg:"" name:"courseId" help:"Course ID or alias"`
+	UserID   string `arg:"" name:"userId" help:"Teacher user ID or email"`
+}
+
+func (c *ClassroomTeachersRemoveCmd) Run(ctx context.Context, flags *RootFlags) error {
+	return runClassroomDelete(ctx, flags, c.CourseID, c.UserID, classroomDeleteOperation{
+		op: "classroom.teachers.remove", parentName: "courseId", parentPayloadKey: "course_id", parentResultKey: "courseId",
+		childName: "userId", childPayloadKey: "user_id", childResultKey: "userId", successResultKey: "removed",
+		action: func(courseID, userID string) string {
+			return fmt.Sprintf("remove teacher %s from %s", userID, courseID)
+		},
+		delete: func(svc *classroom.Service, courseID, userID string) error {
+			_, err := svc.Courses.Teachers.Delete(courseID, userID).Context(ctx).Do()
+			return err
+		},
+	})
+}
+
+type ClassroomRosterCmd struct {
+	CourseID  string `arg:"" name:"courseId" help:"Course ID or alias"`
+	Students  bool   `name:"students" help:"Include students"`
+	Teachers  bool   `name:"teachers" help:"Include teachers"`
+	Max       int64  `name:"max" aliases:"limit" help:"Max results (per role)" default:"100"`
+	Page      string `name:"page" aliases:"cursor" help:"Page token (per role)"`
+	All       bool   `name:"all" aliases:"all-pages,allpages" help:"Fetch all pages (per role)"`
+	FailEmpty bool   `name:"fail-empty" aliases:"non-empty,require-results" help:"Exit with code 3 if no results"`
+}
+
+func (c *ClassroomRosterCmd) Run(ctx context.Context, flags *RootFlags) error {
+	u := ui.FromContext(ctx)
+	courseID := strings.TrimSpace(c.CourseID)
+	if courseID == "" {
+		return usage("empty courseId")
+	}
+	if c.Max <= 0 {
+		return usage("max must be > 0")
+	}
+	account, err := requireAccount(flags)
+	if err != nil {
+		return err
+	}
+
+	includeStudents := c.Students || (!c.Students && !c.Teachers)
+	includeTeachers := c.Teachers || (!c.Students && !c.Teachers)
+
+	svc, err := classroomService(ctx, account)
+	if err != nil {
+		return wrapClassroomError(err)
+	}
+
+	var students []*classroom.Student
+	var teachers []*classroom.Teacher
+	studentsNextPageToken := ""
+	teachersNextPageToken := ""
+
+	if includeStudents {
+		fetch := func(pageToken string) ([]*classroom.Student, string, error) {
+			call := svc.Courses.Students.List(courseID).PageSize(c.Max).Context(ctx)
+			if strings.TrimSpace(pageToken) != "" {
+				call = call.PageToken(pageToken)
+			}
+			resp, callErr := call.Do()
+			if callErr != nil {
+				return nil, "", wrapClassroomError(callErr)
+			}
+			return resp.Students, resp.NextPageToken, nil
+		}
+		students, studentsNextPageToken, err = loadPagedItems(c.Page, c.All, fetch)
+		if err != nil {
+			return err
+		}
+		students = nonNilClassroomItems(students)
+	}
+	if includeTeachers {
+		fetch := func(pageToken string) ([]*classroom.Teacher, string, error) {
+			call := svc.Courses.Teachers.List(courseID).PageSize(c.Max).Context(ctx)
+			if strings.TrimSpace(pageToken) != "" {
+				call = call.PageToken(pageToken)
+			}
+			resp, callErr := call.Do()
+			if callErr != nil {
+				return nil, "", wrapClassroomError(callErr)
+			}
+			return resp.Teachers, resp.NextPageToken, nil
+		}
+		teachers, teachersNextPageToken, err = loadPagedItems(c.Page, c.All, fetch)
+		if err != nil {
+			return err
+		}
+		teachers = nonNilClassroomItems(teachers)
+	}
+
+	if outfmt.IsJSON(ctx) {
+		payload := map[string]any{"courseId": courseID}
+		if includeStudents {
+			payload["students"] = students
+			payload["studentsNextPageToken"] = studentsNextPageToken
+		}
+		if includeTeachers {
+			payload["teachers"] = teachers
+			payload["teachersNextPageToken"] = teachersNextPageToken
+		}
+		if err := outfmt.WriteJSON(ctx, stdoutWriter(ctx), payload); err != nil {
+			return err
+		}
+		if includeStudents && includeTeachers && len(students) == 0 && len(teachers) == 0 {
+			return failEmptyExit(c.FailEmpty)
+		}
+		if includeStudents && !includeTeachers && len(students) == 0 {
+			return failEmptyExit(c.FailEmpty)
+		}
+		if includeTeachers && !includeStudents && len(teachers) == 0 {
+			return failEmptyExit(c.FailEmpty)
+		}
+		return nil
+	}
+
+	if includeStudents && includeTeachers && len(students) == 0 && len(teachers) == 0 {
+		u.Err().Println("No roster entries")
+		return failEmptyExit(c.FailEmpty)
+	}
+	if includeStudents && !includeTeachers && len(students) == 0 {
+		u.Err().Println("No students")
+		return failEmptyExit(c.FailEmpty)
+	}
+	if includeTeachers && !includeStudents && len(teachers) == 0 {
+		u.Err().Println("No teachers")
+		return failEmptyExit(c.FailEmpty)
+	}
+
+	if err := outfmt.WriteTable(
+		ctx,
+		stdoutWriter(ctx),
+		classroomRosterRows(teachers, students),
+		classroomRosterColumns(),
+	); err != nil {
+		return err
+	}
+	if includeTeachers {
+		if teachersNextPageToken != "" {
+			u.Err().Linef("# Next teachers page: --page %s", teachersNextPageToken)
+		}
+	}
+	if includeStudents {
+		if studentsNextPageToken != "" {
+			u.Err().Linef("# Next students page: --page %s", studentsNextPageToken)
+		}
+	}
+	return nil
+}

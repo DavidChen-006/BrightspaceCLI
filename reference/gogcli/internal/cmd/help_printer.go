@@ -1,0 +1,362 @@
+package cmd
+
+import (
+	"bytes"
+	"fmt"
+	"io"
+	"os"
+	"strconv"
+	"strings"
+
+	"github.com/alecthomas/kong"
+	"github.com/muesli/termenv"
+
+	"github.com/openclaw/gogcli/internal/termutil"
+)
+
+const (
+	helpModeAgent = "agent"
+	helpModeFull  = "full"
+)
+
+func helpOptions() kong.HelpOptions {
+	mode := strings.ToLower(strings.TrimSpace(os.Getenv("GOG_HELP")))
+	return kong.HelpOptions{
+		NoExpandSubcommands: mode != helpModeFull,
+	}
+}
+
+func helpPrinter(options kong.HelpOptions, ctx *kong.Context) error {
+	origStdout := ctx.Stdout
+	origStderr := ctx.Stderr
+	profile, err := loadBakedSafetyProfile()
+	if err != nil {
+		return usagef("invalid baked safety profile: %v", err)
+	}
+	if profile.commandNodeBlockedForHelp(ctx.Selected()) {
+		path := commandNodePath(ctx.Selected())
+		if blockErr := profile.commandPathError(path); blockErr != nil {
+			_, _ = fmt.Fprintln(origStdout, blockErr)
+		}
+		return nil
+	}
+	restoreVisibility := applySafetyProfileVisibility(ctx.Model.Node, profile)
+	defer restoreVisibility()
+
+	width := guessColumns(origStdout)
+
+	oldCols, hadCols := os.LookupEnv("COLUMNS")
+	_ = os.Setenv("COLUMNS", strconv.Itoa(width))
+	defer func() {
+		if hadCols {
+			_ = os.Setenv("COLUMNS", oldCols)
+		} else {
+			_ = os.Unsetenv("COLUMNS")
+		}
+	}()
+
+	buf := bytes.NewBuffer(nil)
+	ctx.Stdout = buf
+	ctx.Stderr = origStderr
+	defer func() { ctx.Stdout = origStdout }()
+
+	if helpErr := kong.DefaultHelpPrinter(options, ctx); helpErr != nil {
+		return helpErr
+	}
+
+	out := rewriteCommandSummaries(buf.String(), ctx.Selected())
+	out = removeEmptyCommandGroups(out)
+	out = injectBuildLine(out)
+	out = injectAutomationHelp(out, ctx.Selected())
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("GOG_HELP")), helpModeAgent) {
+		owner := helpOwnerNode(ctx.Selected())
+		if ctx.Selected() == nil || (owner != nil && owner.Type == kong.ApplicationNode) {
+			out = compactAgentHelp(out)
+		}
+	}
+	out = colorizeHelp(out, helpProfile(origStdout, helpColorMode(ctx.Args)))
+	_, err = io.WriteString(origStdout, out)
+	return err
+}
+
+func compactAgentHelp(out string) string {
+	lines := strings.Split(out, "\n")
+	prefix := make([]string, 0, 2)
+	for _, line := range lines {
+		if strings.HasPrefix(line, "Usage:") || strings.HasPrefix(line, "Build:") {
+			prefix = append(prefix, line)
+		}
+	}
+	start := strings.Index(out, "Automation:\n")
+	if start < 0 {
+		return out
+	}
+	section := out[start:]
+	if end := strings.Index(section, "\nCommands:\n"); end >= 0 {
+		section = section[:end]
+	}
+	return strings.Join(prefix, "\n") + "\n\n" + strings.TrimSpace(section) + "\n"
+}
+
+func injectBuildLine(out string) string {
+	v := resolvedVersion()
+	c := strings.TrimSpace(commit)
+	line := fmt.Sprintf("Build: %s", v)
+	if c != "" {
+		line = fmt.Sprintf("%s (%s)", line, c)
+	}
+
+	lines := strings.Split(out, "\n")
+	for i, l := range lines {
+		if strings.HasPrefix(l, "Usage:") {
+			if i+1 < len(lines) && lines[i+1] == line {
+				return out
+			}
+			outLines := make([]string, 0, len(lines)+1)
+			outLines = append(outLines, lines[:i+1]...)
+			outLines = append(outLines, line)
+			outLines = append(outLines, lines[i+1:]...)
+			return strings.Join(outLines, "\n")
+		}
+	}
+	return out
+}
+
+func injectAutomationHelp(out string, selected *kong.Node) string {
+	owner := helpOwnerNode(selected)
+	if selected != nil && (owner == nil || owner.Type != kong.ApplicationNode) {
+		return out
+	}
+	if strings.Contains(out, "\nAutomation:\n") {
+		return out
+	}
+
+	const section = `Automation:
+  Use --json or --plain for stable output; --no-input disables prompts.
+  Common read-only commands:
+    gog gmail labels list --json --results-only
+    gog calendar calendars --json --results-only
+    gog drive search <text> --json --results-only
+  For exact Drive API filters, add --raw-query to drive search.
+  Run "gog schema <command path>" for a targeted machine-readable contract.
+  Use "gog help <command>" or "gog <command> --help" for prose help.
+  Exit codes: 0 success, 1 error, 2 usage, 3 empty, 4 auth, 5 not found,
+    6 denied, 7 rate limited, 8 retryable, 10 config, 11 orphaned,
+    130 interrupted.
+  Run "gog schema --json" for the complete machine-readable contract.
+`
+	if marker := "\nCommands:\n"; strings.Contains(out, marker) {
+		return strings.Replace(out, marker, "\n"+section+marker, 1)
+	}
+	return out + "\n" + section
+}
+
+func helpOwnerNode(selected *kong.Node) *kong.Node {
+	for node := selected; node != nil; node = node.Parent {
+		if node.Type == kong.CommandNode || node.Type == kong.ApplicationNode {
+			return node
+		}
+	}
+	return nil
+}
+
+func helpColorMode(args []string) string {
+	if v := strings.ToLower(strings.TrimSpace(os.Getenv("GOG_COLOR"))); v != "" {
+		return v
+	}
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if a == "--plain" || a == "--json" {
+			return colorNever
+		}
+		if a == "--color" && i+1 < len(args) {
+			return strings.ToLower(strings.TrimSpace(args[i+1]))
+		}
+		if strings.HasPrefix(a, "--color=") {
+			return strings.ToLower(strings.TrimSpace(strings.TrimPrefix(a, "--color=")))
+		}
+	}
+	return colorAuto
+}
+
+func helpProfile(stdout io.Writer, mode string) termenv.Profile {
+	if termenv.EnvNoColor() {
+		return termenv.Ascii
+	}
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	if mode == "" {
+		mode = colorAuto
+	}
+	switch mode {
+	case colorNever:
+		return termenv.Ascii
+	case "always":
+		return termenv.TrueColor
+	default:
+		o := termenv.NewOutput(stdout, termenv.WithProfile(termenv.EnvColorProfile()))
+		return o.Profile
+	}
+}
+
+func colorizeHelp(out string, profile termenv.Profile) string {
+	if profile == termenv.Ascii {
+		return out
+	}
+	heading := func(s string) string {
+		return termenv.String(s).Foreground(profile.Color("#60a5fa")).Bold().String()
+	}
+	section := func(s string) string {
+		return termenv.String(s).Foreground(profile.Color("#a78bfa")).Bold().String()
+	}
+	group := func(s string) string {
+		return termenv.String(s).Foreground(profile.Color("#34d399")).Bold().String()
+	}
+	cmdName := func(s string) string {
+		return termenv.String(s).Foreground(profile.Color("#38bdf8")).Bold().String()
+	}
+	dim := func(s string) string {
+		return termenv.String(s).Foreground(profile.Color("#9ca3af")).String()
+	}
+
+	inCommands := false
+	lines := strings.Split(out, "\n")
+	for i, line := range lines {
+		if line == "Commands:" {
+			inCommands = true
+		}
+		switch {
+		case strings.HasPrefix(line, "Usage:"):
+			lines[i] = heading("Usage:") + strings.TrimPrefix(line, "Usage:")
+		case line == "Flags:":
+			lines[i] = section(line)
+		case line == "Commands:":
+			lines[i] = section(line)
+		case line == "Arguments:":
+			lines[i] = section(line)
+		case line == "Automation:":
+			lines[i] = section(line)
+		case strings.HasPrefix(line, "Build:") || line == "Config:":
+			lines[i] = section(line)
+		case line == "Read" || line == "Write" || line == "Organize" || line == "Admin":
+			lines[i] = group(line)
+		case inCommands && strings.HasPrefix(line, "  ") && (len(line) < 3 || line[2] != ' '):
+			lines[i] = colorizeCommandSummaryLine(line, cmdName, dim)
+		case inCommands && strings.HasPrefix(line, "    ") && strings.TrimSpace(line) != "":
+			lines[i] = "    " + dim(strings.TrimPrefix(line, "    "))
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+func removeEmptyCommandGroups(out string) string {
+	lines := strings.Split(out, "\n")
+	skip := map[int]bool{}
+	for i, line := range lines {
+		if !isHelpCommandGroup(line) {
+			continue
+		}
+		if !helpGroupHasCommand(lines, i+1) {
+			skip[i] = true
+		}
+	}
+	if len(skip) == 0 {
+		return out
+	}
+	kept := make([]string, 0, len(lines)-len(skip))
+	for i, line := range lines {
+		if skip[i] {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	return strings.Join(kept, "\n")
+}
+
+func helpGroupHasCommand(lines []string, start int) bool {
+	for i := start; i < len(lines); i++ {
+		line := lines[i]
+		if isHelpCommandGroup(line) || isHelpSection(line) {
+			return false
+		}
+		if isHelpCommandSummaryLine(line) {
+			return true
+		}
+	}
+	return false
+}
+
+func isHelpCommandGroup(line string) bool {
+	switch line {
+	case "Read", "Write", "Organize", "Admin":
+		return true
+	default:
+		return false
+	}
+}
+
+func isHelpSection(line string) bool {
+	return line == "Usage:" || strings.HasPrefix(line, "Usage:") || line == "Flags:" || line == "Commands:" || line == "Arguments:" || line == "Automation:" || strings.HasPrefix(line, "Build:") || line == "Config:"
+}
+
+func isHelpCommandSummaryLine(line string) bool {
+	return strings.HasPrefix(line, "  ") && (len(line) < 3 || line[2] != ' ') && strings.TrimSpace(line) != ""
+}
+
+func colorizeCommandSummaryLine(line string, cmdName func(string) string, dim func(string) string) string {
+	if !strings.HasPrefix(line, "  ") {
+		return line
+	}
+	rest := strings.TrimPrefix(line, "  ")
+	if rest == "" {
+		return line
+	}
+	name, tail, _ := strings.Cut(rest, " ")
+	if name == "" {
+		return line
+	}
+
+	styled := cmdName(name)
+	if tail == "" {
+		return "  " + styled
+	}
+
+	// Keep placeholders readable but lower-contrast.
+	tail = strings.ReplaceAll(tail, "<", dim("<"))
+	tail = strings.ReplaceAll(tail, ">", dim(">"))
+	tail = strings.ReplaceAll(tail, "[flags]", dim("[flags]"))
+	return "  " + styled + " " + tail
+}
+
+func rewriteCommandSummaries(out string, selected *kong.Node) string {
+	if selected == nil {
+		return out
+	}
+	prefix := selected.Path() + " "
+	lines := strings.Split(out, "\n")
+	for i, line := range lines {
+		trimmed := strings.TrimLeft(line, " ")
+		if strings.HasPrefix(trimmed, prefix) && strings.HasPrefix(line, "  ") {
+			indent := line[:len(line)-len(trimmed)]
+			lines[i] = indent + strings.TrimPrefix(trimmed, prefix)
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+func guessColumns(w io.Writer) int {
+	if colsStr := os.Getenv("COLUMNS"); colsStr != "" {
+		if cols, err := strconv.Atoi(colsStr); err == nil {
+			return cols
+		}
+	}
+	f, ok := w.(*os.File)
+	if !ok {
+		return 80
+	}
+
+	width, _, err := termutil.GetSize(f)
+	if err == nil && width > 0 {
+		return width
+	}
+	return 80
+}

@@ -1,0 +1,385 @@
+package cmd
+
+import (
+	"context"
+	"fmt"
+	"html"
+	"net/mail"
+	"strings"
+	"time"
+
+	"google.golang.org/api/gmail/v1"
+
+	"github.com/openclaw/gogcli/internal/gmailcontent"
+	"github.com/openclaw/gogcli/internal/mailmime"
+)
+
+// buildReplyAllRecipients constructs To and Cc lists for a reply-all.
+// Per RFC 5322: if Reply-To header is present, use it instead of From.
+func buildReplyAllRecipients(info *replyInfo, selfEmail string) (to, cc []string) {
+	recipients, err := buildReplyRecipients(info, []string{selfEmail}, true, nil, nil, nil, nil)
+	if err != nil {
+		return nil, nil
+	}
+	return formatMailboxes(recipients.To), formatMailboxes(recipients.Cc)
+}
+
+// replyInfo contains all information extracted from the original message for replying.
+type replyInfo struct {
+	InReplyTo       string
+	References      string
+	ThreadID        string
+	FromAddr        string
+	ReplyToAddr     string
+	ToHeader        string
+	CcHeader        string
+	ToAddrs         []string
+	CcAddrs         []string
+	Date            string
+	Subject         string
+	Body            string
+	BodyHTML        string
+	InlineResources []mailmime.Attachment
+}
+
+// hasQuotableText reports whether the original message carries any text that
+// can be quoted; an attachment-only original carries none.
+func (info *replyInfo) hasQuotableText() bool {
+	return info != nil && (info.Body != "" || info.BodyHTML != "")
+}
+
+func replyHeaders(ctx context.Context, svc *gmail.Service, replyToMessageID string) (inReplyTo string, references string, threadID string, err error) {
+	info, err := fetchReplyInfo(ctx, svc, replyToMessageID, "", false)
+	if err != nil {
+		return "", "", "", err
+	}
+	return info.InReplyTo, info.References, info.ThreadID, nil
+}
+
+func fetchReplyInfo(ctx context.Context, svc *gmail.Service, replyToMessageID string, threadID string, includeQuoteBodies bool) (*replyInfo, error) {
+	replyToMessageID = strings.TrimSpace(replyToMessageID)
+	threadID = strings.TrimSpace(threadID)
+	if replyToMessageID == "" && threadID == "" {
+		return &replyInfo{}, nil
+	}
+
+	if replyToMessageID != "" {
+		msg, err := fetchMessageForReplyInfo(ctx, svc, replyToMessageID, includeQuoteBodies)
+		if err != nil {
+			return nil, err
+		}
+		if msg == nil {
+			return nil, fmt.Errorf("fetch message %s: empty response", replyToMessageID)
+		}
+		// A draft has never been delivered, so nothing can thread against its
+		// Message-Id. Refuse rather than emit a reference to a message that
+		// does not exist for any recipient.
+		if hasLabel(msg.LabelIds, "DRAFT") {
+			return nil, fmt.Errorf("reply target message %s is a draft; cannot reply to an unsent message", replyToMessageID)
+		}
+		info := replyInfoFromMessage(msg, includeQuoteBodies)
+		if includeQuoteBodies {
+			info.InlineResources, err = preserveReferencedInlineResources(ctx, svc, msg.Id, msg.Payload, info.BodyHTML)
+			if err != nil {
+				return nil, fmt.Errorf("preserve quoted inline images: %w", err)
+			}
+		}
+		if info.InReplyTo == "" {
+			return nil, fmt.Errorf("reply target message %s has no Message-ID header; cannot set In-Reply-To/References", replyToMessageID)
+		}
+		return info, nil
+	}
+
+	thread, err := fetchThreadForReplyInfo(ctx, svc, threadID)
+	if err != nil {
+		return nil, err
+	}
+	if thread == nil || len(thread.Messages) == 0 {
+		return nil, fmt.Errorf("thread %s has no messages", threadID)
+	}
+
+	// Only sent or received messages are valid reply parents; a draft in the
+	// thread (including this draft's own previous revision) is not.
+	msg := selectLatestThreadMessage(nonDraftMessages(thread.Messages))
+	if msg == nil {
+		return nil, fmt.Errorf("thread %s has no sent or received message to reply to (drafts cannot be reply targets)", threadID)
+	}
+	if includeQuoteBodies && msg.Id != "" {
+		// The quote was requested; failing to fetch the body must abort the
+		// compose rather than silently proceed without the quote.
+		fullMsg, fullErr := fetchMessageForReplyInfo(ctx, svc, msg.Id, true)
+		if fullErr != nil {
+			return nil, fmt.Errorf("fetch message %s for quoting: %w", msg.Id, fullErr)
+		}
+		if fullMsg == nil {
+			return nil, fmt.Errorf("fetch message %s for quoting: empty response", msg.Id)
+		}
+		msg = fullMsg
+	}
+
+	info := replyInfoFromMessage(msg, includeQuoteBodies)
+	if includeQuoteBodies {
+		info.InlineResources, err = preserveReferencedInlineResources(ctx, svc, msg.Id, msg.Payload, info.BodyHTML)
+		if err != nil {
+			return nil, fmt.Errorf("preserve quoted inline images: %w", err)
+		}
+	}
+	if info.ThreadID == "" {
+		info.ThreadID = thread.Id
+	}
+	return info, nil
+}
+
+func fetchMessageForReplyInfo(ctx context.Context, svc *gmail.Service, messageID string, includeQuoteBodies bool) (*gmail.Message, error) {
+	call := svc.Users.Messages.Get("me", messageID).Context(ctx)
+	if includeQuoteBodies {
+		call = call.Format(gmailFormatFull)
+	} else {
+		call = call.Format(gmailFormatMetadata).MetadataHeaders(gmailReplyMetadataHeaders...)
+	}
+	return call.Do()
+}
+
+func fetchThreadForReplyInfo(ctx context.Context, svc *gmail.Service, threadID string) (*gmail.Thread, error) {
+	return svc.Users.Threads.Get("me", threadID).
+		Format(gmailFormatMetadata).
+		MetadataHeaders(gmailReplyMetadataHeaders...).
+		Context(ctx).
+		Do()
+}
+
+func replyInfoFromMessage(msg *gmail.Message, includeQuoteBodies bool) *replyInfo {
+	if msg == nil {
+		return &replyInfo{}
+	}
+	info := &replyInfo{
+		ThreadID:    msg.ThreadId,
+		FromAddr:    headerValue(msg.Payload, "From"),
+		ReplyToAddr: headerValue(msg.Payload, "Reply-To"),
+		ToHeader:    headerValue(msg.Payload, "To"),
+		CcHeader:    headerValue(msg.Payload, "Cc"),
+		Date:        headerValue(msg.Payload, "Date"),
+		Subject:     headerValue(msg.Payload, "Subject"),
+	}
+	info.ToAddrs = parseEmailAddresses(info.ToHeader)
+	info.CcAddrs = parseEmailAddresses(info.CcHeader)
+
+	if includeQuoteBodies {
+		plain := gmailcontent.FindPartBody(msg.Payload, "text/plain")
+		// Some messages put HTML into text/plain; never dump raw HTML into the plain quote.
+		if plain != "" && !gmailcontent.LooksLikeHTML(plain) {
+			info.Body = plain
+		}
+		info.BodyHTML = gmailcontent.FindPartBody(msg.Payload, "text/html")
+	}
+
+	messageID := headerValue(msg.Payload, "Message-ID")
+	if messageID == "" {
+		messageID = headerValue(msg.Payload, "Message-Id")
+	}
+	info.InReplyTo = messageID
+	info.References = strings.TrimSpace(headerValue(msg.Payload, "References"))
+	if info.References == "" {
+		info.References = messageID
+	} else if messageID != "" && !strings.Contains(info.References, messageID) {
+		info.References = info.References + " " + messageID
+	}
+	return info
+}
+
+// nonDraftMessages drops draft messages from a thread. Reply headers may only
+// ever point at a message that was actually sent or received.
+func nonDraftMessages(messages []*gmail.Message) []*gmail.Message {
+	out := make([]*gmail.Message, 0, len(messages))
+	for _, msg := range messages {
+		if msg == nil || hasLabel(msg.LabelIds, "DRAFT") {
+			continue
+		}
+		out = append(out, msg)
+	}
+	return out
+}
+
+func selectLatestThreadMessage(messages []*gmail.Message) *gmail.Message {
+	var selected *gmail.Message
+	var selectedDate int64
+	hasDate := false
+	for _, msg := range messages {
+		if msg == nil {
+			continue
+		}
+		if msg.InternalDate <= 0 {
+			if selected == nil && !hasDate {
+				selected = msg
+			}
+			continue
+		}
+		if !hasDate || msg.InternalDate > selectedDate {
+			selectedDate = msg.InternalDate
+			selected = msg
+			hasDate = true
+		}
+	}
+	return selected
+}
+
+func parseEmailAddresses(header string) []string {
+	header = strings.TrimSpace(header)
+	if header == "" {
+		return nil
+	}
+	addrs, err := mail.ParseAddressList(header)
+	if err != nil {
+		return parseEmailAddressesFallback(header)
+	}
+	result := make([]string, 0, len(addrs))
+	for _, addr := range addrs {
+		if addr.Address != "" {
+			result = append(result, strings.ToLower(addr.Address))
+		}
+	}
+	return result
+}
+
+func parseEmailAddressesFallback(header string) []string {
+	parts := strings.Split(header, ",")
+	result := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if start := strings.LastIndex(p, "<"); start != -1 {
+			if end := strings.LastIndex(p, ">"); end > start {
+				email := strings.TrimSpace(p[start+1 : end])
+				if email != "" {
+					result = append(result, strings.ToLower(email))
+				}
+				continue
+			}
+		}
+		if strings.Contains(p, "@") {
+			result = append(result, strings.ToLower(p))
+		}
+	}
+	return result
+}
+
+func filterOutSelf(addresses []string, selfEmail string) []string {
+	selfLower := strings.ToLower(selfEmail)
+	result := make([]string, 0, len(addresses))
+	for _, addr := range addresses {
+		if strings.ToLower(addr) != selfLower {
+			result = append(result, addr)
+		}
+	}
+	return result
+}
+
+// deduplicateAddresses removes duplicate recipients, keeping the first
+// occurrence. It keys on the canonical bare address so a formatted mailbox
+// ("Bob" <a@x.com>) and a bare a@x.com (in any case) count as one recipient.
+func deduplicateAddresses(addresses []string) []string {
+	seen := make(map[string]bool)
+	result := make([]string, 0, len(addresses))
+	for _, addr := range addresses {
+		key := canonicalEmail(addr)
+		if !seen[key] {
+			seen[key] = true
+			result = append(result, addr)
+		}
+	}
+	return result
+}
+
+func escapeTextToHTML(value string) string {
+	value = html.EscapeString(value)
+	return strings.ReplaceAll(value, "\n", "<br>\n")
+}
+
+func applyQuoteToBodies(plainBody string, htmlBody string, quote bool, info *replyInfo, loc *time.Location) (string, string) {
+	if !quote || !info.hasQuotableText() {
+		return plainBody, htmlBody
+	}
+
+	userPlain := plainBody
+	hasHTMLReply := strings.TrimSpace(htmlBody) != ""
+	if strings.TrimSpace(userPlain) == "" && hasHTMLReply {
+		userPlain = htmlToPlainText(htmlBody)
+	}
+
+	quotedPlain := info.Body
+	if strings.TrimSpace(quotedPlain) == "" && strings.TrimSpace(info.BodyHTML) != "" {
+		quotedPlain = htmlToPlainText(info.BodyHTML)
+	}
+
+	outPlain := userPlain
+	if quotedPlain != "" && (!hasHTMLReply || strings.TrimSpace(userPlain) != "") {
+		outPlain += formatQuotedMessage(info.FromAddr, info.Date, quotedPlain, loc)
+	}
+
+	quoteContent := info.BodyHTML
+	if quoteContent == "" && info.Body != "" {
+		quoteContent = escapeTextToHTML(info.Body)
+	}
+	if quoteContent == "" {
+		return outPlain, htmlBody
+	}
+
+	quoteHTML := formatQuotedMessageHTMLWithContent(info.FromAddr, info.Date, quoteContent, loc)
+
+	outHTML := htmlBody
+	if strings.TrimSpace(outHTML) == "" {
+		outHTML = escapeTextToHTML(strings.TrimSpace(userPlain)) + quoteHTML
+	} else {
+		outHTML += quoteHTML
+	}
+
+	return outPlain, outHTML
+}
+
+// formatQuotedMessage formats the original message as a quoted reply.
+func formatQuotedMessage(from, date, body string, loc *time.Location) string {
+	if body == "" {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString("\n\n")
+
+	displayDate := formatQuoteDate(date, loc)
+	switch {
+	case displayDate != "" && from != "":
+		fmt.Fprintf(&sb, "On %s, %s wrote:\n", displayDate, from)
+	case from != "":
+		fmt.Fprintf(&sb, "%s wrote:\n", from)
+	default:
+		sb.WriteString("Original message:\n")
+	}
+
+	lines := strings.Split(body, "\n")
+	for _, line := range lines {
+		sb.WriteString("> ")
+		sb.WriteString(line)
+		sb.WriteString("\n")
+	}
+
+	return sb.String()
+}
+
+func formatQuotedMessageHTMLWithContent(from, date, htmlContent string, loc *time.Location) string {
+	senderName := from
+	if addr, err := mail.ParseAddress(from); err == nil && addr.Name != "" {
+		senderName = addr.Name
+	}
+
+	dateStr := formatQuoteDate(date, loc)
+	if dateStr == "" {
+		dateStr = "an earlier date"
+	}
+
+	return fmt.Sprintf(`<br><br><div class="gmail_quote"><div class="gmail_attr">On %s, %s wrote:</div><blockquote class="gmail_quote" style="margin:0 0 0 .8ex;border-left:1px #ccc solid;padding-left:1ex">%s</blockquote></div>`,
+		html.EscapeString(dateStr),
+		html.EscapeString(senderName),
+		htmlContent)
+}

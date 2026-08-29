@@ -1,0 +1,123 @@
+package cmd
+
+import (
+	"strings"
+	"testing"
+)
+
+func captureHelpOutput(t *testing.T, args ...string) string {
+	t.Helper()
+	return captureStdout(t, func() {
+		_ = captureStderr(t, func() {
+			if err := Execute(args); err != nil {
+				t.Fatalf("Execute(%v): %v", args, err)
+			}
+		})
+	})
+}
+
+func requireHelpContains(t *testing.T, out string, parts ...string) {
+	t.Helper()
+	for _, part := range parts {
+		if !strings.Contains(out, part) {
+			t.Fatalf("expected help to contain %q, got: %q", part, out)
+		}
+	}
+}
+
+func TestHelpSnapshot_Auth(t *testing.T) {
+	out := captureHelpOutput(t, "auth", "--help")
+	requireHelpContains(t, out,
+		"\n  add",
+		"\n  credentials",
+		"\n  tokens",
+		"\n  alias",
+	)
+}
+
+func TestHelpSnapshot_AuthImport(t *testing.T) {
+	out := captureHelpOutput(t, "auth", "import", "--help")
+	requireHelpContains(t, out,
+		"required refresh token",
+		"requires a refresh-token source",
+		"optional access token",
+	)
+}
+
+func TestHelpSnapshot_DocsUpdate(t *testing.T) {
+	out := captureHelpOutput(t, "docs", "update", "--help")
+	requireHelpContains(t, out,
+		"--tab",
+		"--text",
+		"--file",
+		"--index",
+	)
+}
+
+func TestHelpSnapshot_Sheets(t *testing.T) {
+	out := captureHelpOutput(t, "sheets", "--help")
+	requireHelpContains(t, out,
+		"\n  add-tab",
+		"\n  rename-tab",
+		"\n  delete-tab",
+		"\n  named-ranges",
+		"\n  update-note",
+	)
+}
+
+func TestHelpSnapshot_Forms(t *testing.T) {
+	out := captureHelpOutput(t, "forms", "--help")
+	requireHelpContains(t, out,
+		"\n  create",
+		"\n  update",
+		"\n  add-question",
+		"\n  watch",
+	)
+}
+
+func TestHelpSnapshot_Meet(t *testing.T) {
+	out := captureHelpOutput(t, "meet", "--help")
+	requireHelpContains(t, out,
+		"\n  create",
+		"\n  get",
+		"\n  update",
+		"\n  end",
+		"\n  history",
+		"\n  participants",
+	)
+}
+
+func TestHelpSnapshot_Admin(t *testing.T) {
+	out := captureHelpOutput(t, "admin", "--help")
+	requireHelpContains(t, out,
+		"\n  users",
+		"\n  groups",
+	)
+}
+
+func TestHelpSnapshot_RootAutomationContract(t *testing.T) {
+	out := captureHelpOutput(t, "--help")
+	requireHelpContains(t, out,
+		"\nAutomation:\n",
+		"Use --json or --plain for stable output",
+		`Use "gog help <command>"`,
+		"Exit codes: 0 success",
+		`Run "gog schema --json"`,
+	)
+	if strings.Contains(out, "\n  capabilities") || strings.Contains(out, "\n  exit-codes") {
+		t.Fatalf("removed discovery commands leaked into help: %q", out)
+	}
+}
+
+func TestHelpSnapshot_RootAgentMode(t *testing.T) {
+	t.Setenv("GOG_HELP", "agent")
+	out := captureHelpOutput(t, "--help")
+	requireHelpContains(t, out,
+		"Usage: gog <command>",
+		"\nAutomation:\n",
+		"gog gmail labels list --json --results-only",
+	)
+	if strings.Contains(out, "\nFlags:\n") || strings.Contains(out, "\nCommands:\n") {
+		t.Fatalf("agent help retained verbose sections: %q", out)
+	}
+}

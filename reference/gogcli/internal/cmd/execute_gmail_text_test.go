@@ -1,0 +1,382 @@
+package cmd
+
+import (
+	"encoding/base64"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestExecute_GmailThread_Text_DraftMarker(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.URL.Path, "/gmail/v1/users/me/threads/t-thread-draft") {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id": "t-thread-draft",
+			"messages": []map[string]any{
+				{
+					"id":       "m-inbound",
+					"labelIds": []string{"INBOX"},
+					"payload":  map[string]any{"headers": []map[string]any{}},
+				},
+				{
+					"id":       "m-draft",
+					"labelIds": []string{"DRAFT"},
+					"payload":  map[string]any{"headers": []map[string]any{}},
+				},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	svc := newGmailServiceFromServer(t, srv)
+
+	t.Run("human output marks only the draft", func(t *testing.T) {
+		result := executeWithGmailTestService(t, []string{
+			"--account", "a@b.com", "gmail", "thread", "get", "t-thread-draft",
+		}, svc)
+		if result.err != nil {
+			t.Fatalf("Execute: %v\nstderr=%q", result.err, result.stderr)
+		}
+		if !strings.Contains(result.stdout, "=== Message 1/2: m-inbound ===") {
+			t.Fatalf("expected unchanged non-draft heading, got=%q", result.stdout)
+		}
+		if !strings.Contains(result.stdout, "=== Message 2/2: m-draft [DRAFT — NOT SENT] ===") {
+			t.Fatalf("expected marked draft heading, got=%q", result.stdout)
+		}
+		if strings.Count(result.stdout, gmailDraftNotSentMarker) != 1 {
+			t.Fatalf("expected exactly one draft marker, got=%q", result.stdout)
+		}
+	})
+
+	t.Run("plain output is unchanged", func(t *testing.T) {
+		result := executeWithGmailTestService(t, []string{
+			"--plain", "--account", "a@b.com", "gmail", "thread", "get", "t-thread-draft",
+		}, svc)
+		if result.err != nil {
+			t.Fatalf("Execute: %v\nstderr=%q", result.err, result.stderr)
+		}
+		if !strings.Contains(result.stdout, "=== Message 2/2: m-draft ===") || strings.Contains(result.stdout, gmailDraftNotSentMarker) {
+			t.Fatalf("expected unchanged plain heading, got=%q", result.stdout)
+		}
+	})
+
+	t.Run("JSON output is unchanged", func(t *testing.T) {
+		result := executeWithGmailTestService(t, []string{
+			"--json", "--account", "a@b.com", "gmail", "thread", "get", "t-thread-draft",
+		}, svc)
+		if result.err != nil {
+			t.Fatalf("Execute: %v\nstderr=%q", result.err, result.stderr)
+		}
+		if strings.Contains(result.stdout, gmailDraftNotSentMarker) || !strings.Contains(result.stdout, `"labelIds": [`) || !strings.Contains(result.stdout, `"DRAFT"`) {
+			t.Fatalf("expected unchanged JSON labels without display marker, got=%q", result.stdout)
+		}
+	})
+}
+
+func TestExecute_GmailThread_Text_Download(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	wd := t.TempDir()
+	origWD, _ := os.Getwd()
+	t.Cleanup(func() { _ = os.Chdir(origWD) })
+	if err := os.Chdir(wd); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+
+	attData := []byte("hello")
+	attEncoded := base64.RawURLEncoding.EncodeToString(attData)
+	bodyEncoded := base64.RawURLEncoding.EncodeToString([]byte("body"))
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "/gmail/v1/users/me/threads/t-thread-1"):
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id": "t-thread-1",
+				"messages": []map[string]any{
+					{
+						"id": "m-thread-1",
+						"payload": map[string]any{
+							"headers": []map[string]any{
+								{"name": "From", "value": "Me <me@example.com>"},
+								{"name": "To", "value": "You <you@example.com>"},
+								{"name": "Subject", "value": "Hello"},
+								{"name": "Date", "value": "Wed, 17 Dec 2025 14:00:00 -0800"},
+							},
+							"parts": []map[string]any{
+								{ // body
+									"mimeType": "text/plain",
+									"body":     map[string]any{"data": bodyEncoded},
+								},
+								{ // attachment
+									"filename": "a.txt",
+									"mimeType": "text/plain",
+									"body":     map[string]any{"attachmentId": "a-thread-1", "size": len(attData)},
+								},
+							},
+						},
+					},
+				},
+			})
+			return
+		case strings.Contains(r.URL.Path, "/gmail/v1/users/me/messages/m-thread-1/attachments/a-thread-1"):
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": attEncoded})
+			return
+		default:
+			http.NotFound(w, r)
+			return
+		}
+	}))
+	defer srv.Close()
+
+	svc := newGmailServiceFromServer(t, srv)
+	result := executeWithGmailTestService(t, []string{"--plain", "--account", "a@b.com", "gmail", "thread", "get", "t-thread-1", "--download"}, svc)
+	if result.err != nil {
+		t.Fatalf("Execute: %v", result.err)
+	}
+	if !strings.Contains(result.stdout, "=== Message 1/1: m-thread-1 ===") || !strings.Contains(result.stdout, "Attachments:") || !(strings.Contains(result.stdout, "Saved:") || strings.Contains(result.stdout, "Cached:")) {
+		t.Fatalf("unexpected out=%q", result.stdout)
+	}
+
+	expectedPath := filepath.Join(wd, "m-thread-1_a-thread_a.txt")
+	b, err := os.ReadFile(expectedPath)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(b) != string(attData) {
+		t.Fatalf("content=%q", string(b))
+	}
+}
+
+func TestExecute_GmailThread_Text_FullFlag(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	longBody := strings.Repeat("a", gmailDefaultTextBodyLimit+100)
+	bodyEncoded := base64.RawURLEncoding.EncodeToString([]byte(longBody))
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "/gmail/v1/users/me/threads/t-thread-1"):
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id": "t-thread-1",
+				"messages": []map[string]any{
+					{
+						"id": "m-thread-1",
+						"payload": map[string]any{
+							"headers": []map[string]any{
+								{"name": "From", "value": "Me <me@example.com>"},
+								{"name": "To", "value": "You <you@example.com>"},
+								{"name": "Subject", "value": "Hello"},
+								{"name": "Date", "value": "Wed, 17 Dec 2025 14:00:00 -0800"},
+							},
+							"parts": []map[string]any{
+								{
+									"mimeType": "text/plain",
+									"body":     map[string]any{"data": bodyEncoded},
+								},
+							},
+						},
+					},
+				},
+			})
+			return
+		default:
+			http.NotFound(w, r)
+			return
+		}
+	}))
+	defer srv.Close()
+
+	svc := newGmailServiceFromServer(t, srv)
+
+	t.Run("default truncates", func(t *testing.T) {
+		result := executeWithGmailTestService(t, []string{"--plain", "--account", "a@b.com", "gmail", "thread", "get", "t-thread-1"}, svc)
+		if result.err != nil {
+			t.Fatalf("Execute: %v", result.err)
+		}
+
+		if !strings.Contains(result.stdout, gmailTextTruncationMarker) {
+			t.Fatalf("expected truncated output, got=%q", result.stdout)
+		}
+		if strings.Contains(result.stdout, longBody) {
+			t.Fatalf("expected body to be truncated, got=%q", result.stdout)
+		}
+	})
+
+	t.Run("--full shows complete body", func(t *testing.T) {
+		result := executeWithGmailTestService(t, []string{"--plain", "--account", "a@b.com", "gmail", "thread", "get", "t-thread-1", "--full"}, svc)
+		if result.err != nil {
+			t.Fatalf("Execute: %v", result.err)
+		}
+
+		if strings.Contains(result.stdout, "[truncated") {
+			t.Fatalf("expected full output, got=%q", result.stdout)
+		}
+		if !strings.Contains(result.stdout, longBody) {
+			t.Fatalf("expected full body, got=%q", result.stdout)
+		}
+	})
+}
+
+func TestExecute_GmailDraftsGet_Text_Download(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	attData := []byte("hello")
+	attEncoded := base64.RawURLEncoding.EncodeToString(attData)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "/gmail/v1/users/me/drafts/d1"):
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id": "d1",
+				"message": map[string]any{
+					"id": "m-draft-1",
+					"payload": map[string]any{
+						"headers": []map[string]any{
+							{"name": "To", "value": "x@y.com"},
+							{"name": "Subject", "value": "S"},
+						},
+						"parts": []map[string]any{
+							{
+								"filename": "a.txt",
+								"mimeType": "text/plain",
+								"body":     map[string]any{"attachmentId": "a-draft-1", "size": len(attData)},
+							},
+						},
+					},
+				},
+			})
+			return
+		case strings.Contains(r.URL.Path, "/gmail/v1/users/me/messages/m-draft-1/attachments/a-draft-1"):
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": attEncoded})
+			return
+		default:
+			http.NotFound(w, r)
+			return
+		}
+	}))
+	defer srv.Close()
+
+	svc := newGmailServiceFromServer(t, srv)
+	result := executeWithGmailTestService(t, []string{"--plain", "--account", "a@b.com", "gmail", "drafts", "get", "d1", "--download"}, svc)
+	if result.err != nil {
+		t.Fatalf("Execute: %v", result.err)
+	}
+	if !strings.Contains(result.stdout, "Draft-ID: d1") || !strings.Contains(result.stdout, "Attachments:") || (!strings.Contains(result.stdout, "Saved:") && !strings.Contains(result.stdout, "Cached:")) {
+		t.Fatalf("unexpected out=%q", result.stdout)
+	}
+}
+
+func TestExecute_GmailThread_OutDir_CreatesParents_JSON(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	wd := t.TempDir()
+	origWD, _ := os.Getwd()
+	t.Cleanup(func() { _ = os.Chdir(origWD) })
+	if err := os.Chdir(wd); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+
+	attData := []byte("hello")
+	attEncoded := base64.RawURLEncoding.EncodeToString(attData)
+
+	attachmentCalls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "/gmail/v1/users/me/threads/t-thread-1"):
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id": "t-thread-1",
+				"messages": []map[string]any{
+					{
+						"id": "m-thread-1",
+						"payload": map[string]any{
+							"parts": []map[string]any{
+								{
+									"filename": "a.txt",
+									"mimeType": "text/plain",
+									"body":     map[string]any{"attachmentId": "a-thread-1", "size": len(attData)},
+								},
+							},
+						},
+					},
+				},
+			})
+			return
+		case strings.Contains(r.URL.Path, "/gmail/v1/users/me/messages/m-thread-1/attachments/a-thread-1"):
+			attachmentCalls++
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": attEncoded})
+			return
+		default:
+			http.NotFound(w, r)
+			return
+		}
+	}))
+	defer srv.Close()
+
+	svc := newGmailServiceFromServer(t, srv)
+
+	outDir := filepath.Join("nested", "attachments")
+	run := func() map[string]any {
+		result := executeWithGmailTestService(t, []string{
+			"--json",
+			"--account", "a@b.com",
+			"gmail", "thread", "get", "t-thread-1",
+			"--download",
+			"--out-dir", outDir,
+		}, svc)
+		if result.err != nil {
+			t.Fatalf("Execute: %v", result.err)
+		}
+		var parsed map[string]any
+		if unmarshalErr := json.Unmarshal([]byte(result.stdout), &parsed); unmarshalErr != nil {
+			t.Fatalf("json parse: %v\nout=%q", unmarshalErr, result.stdout)
+		}
+		return parsed
+	}
+
+	parsed1 := run()
+	if attachmentCalls != 1 {
+		t.Fatalf("attachmentCalls=%d", attachmentCalls)
+	}
+	downloaded, _ := parsed1["downloaded"].([]any)
+	if len(downloaded) != 1 {
+		t.Fatalf("downloaded=%v", parsed1["downloaded"])
+	}
+	item, _ := downloaded[0].(map[string]any)
+	path, _ := item["path"].(string)
+	if path != filepath.Join(outDir, "m-thread-1_a-thread_a.txt") {
+		t.Fatalf("path=%q", path)
+	}
+	b, err := os.ReadFile(filepath.Join(wd, path))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(b) != string(attData) {
+		t.Fatalf("content=%q", string(b))
+	}
+
+	parsed2 := run()
+	if attachmentCalls != 1 {
+		t.Fatalf("attachmentCalls=%d", attachmentCalls)
+	}
+	downloaded2, _ := parsed2["downloaded"].([]any)
+	if len(downloaded2) != 1 {
+		t.Fatalf("downloaded=%v", parsed2["downloaded"])
+	}
+	item2, _ := downloaded2[0].(map[string]any)
+	if item2["cached"] != true {
+		t.Fatalf("cached=%v", item2["cached"])
+	}
+}

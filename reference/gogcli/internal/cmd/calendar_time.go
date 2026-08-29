@@ -1,0 +1,76 @@
+package cmd
+
+import (
+	"context"
+	"time"
+
+	"github.com/openclaw/gogcli/internal/outfmt"
+	"github.com/openclaw/gogcli/internal/ui"
+)
+
+type CalendarTimeCmd struct {
+	CalendarID string `name:"calendar" help:"Calendar ID to get timezone from" default:"primary"`
+	Timezone   string `name:"timezone" help:"Override timezone (e.g., America/New_York, UTC)"`
+}
+
+func (c *CalendarTimeCmd) Run(ctx context.Context, flags *RootFlags) error {
+	u := ui.FromContext(ctx)
+	account, err := requireAccount(flags)
+	if err != nil {
+		return err
+	}
+
+	store, err := commandConfigStore(ctx)
+	if err != nil {
+		return err
+	}
+	calendarID, err := prepareCalendarID(store, c.CalendarID, true)
+	if err != nil {
+		return err
+	}
+
+	var tz string
+	var loc *time.Location
+
+	// Check for explicitly configured timezone (flag, env, or config)
+	loc, err = getConfiguredTimezone(ctx, c.Timezone, stderrWriter(ctx))
+	if err != nil {
+		return err
+	}
+
+	if loc != nil {
+		// Timezone was explicitly configured
+		tz = loc.String()
+	} else {
+		// Fall back to Google Calendar's timezone
+		svc, err := calendarService(ctx, account)
+		if err != nil {
+			return err
+		}
+
+		calendarID, err = resolveCalendarSelector(ctx, store, svc, calendarID, true)
+		if err != nil {
+			return err
+		}
+		tz, loc, err = getCalendarLocation(ctx, svc, calendarID)
+		if err != nil {
+			return err
+		}
+	}
+
+	now := time.Now().In(loc)
+	formatted := now.Format("Monday, January 02, 2006 03:04 PM")
+
+	if outfmt.IsJSON(ctx) {
+		return outfmt.WriteJSON(ctx, stdoutWriter(ctx), map[string]any{
+			"timezone":     tz,
+			"current_time": now.Format(time.RFC3339),
+			"formatted":    formatted,
+		})
+	}
+
+	u.Out().Linef("timezone\t%s", tz)
+	u.Out().Linef("current_time\t%s", now.Format(time.RFC3339))
+	u.Out().Linef("formatted\t%s", formatted)
+	return nil
+}

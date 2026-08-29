@@ -1,0 +1,119 @@
+package cmd
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"time"
+
+	"google.golang.org/api/people/v1"
+
+	"github.com/openclaw/gogcli/internal/outfmt"
+	"github.com/openclaw/gogcli/internal/ui"
+)
+
+const calendarUsersRequestTimeout = 20 * time.Second
+
+type CalendarUsersCmd struct {
+	Max       int64  `name:"max" aliases:"limit" help:"Max results" default:"100"`
+	Page      string `name:"page" aliases:"cursor" help:"Page token"`
+	All       bool   `name:"all" aliases:"all-pages,allpages" help:"Fetch all pages"`
+	FailEmpty bool   `name:"fail-empty" aliases:"non-empty,require-results" help:"Exit with code 3 if no results"`
+}
+
+func (c *CalendarUsersCmd) Run(ctx context.Context, flags *RootFlags) error {
+	u := ui.FromContext(ctx)
+	if c.Max <= 0 {
+		return usage("max must be > 0")
+	}
+	account, err := requireAccount(flags)
+	if err != nil {
+		return err
+	}
+
+	svc, err := peopleDirectoryService(ctx, account)
+	if err != nil {
+		if strings.Contains(err.Error(), "accessNotConfigured") ||
+			strings.Contains(err.Error(), "People API has not been used") {
+			return fmt.Errorf("people API is not enabled; enable it at: %s (%w)", peopleAPIEnableURL, err)
+		}
+		return err
+	}
+
+	fetch := func(pageToken string) ([]*people.Person, string, error) {
+		ctxTimeout, cancel := context.WithTimeout(ctx, calendarUsersRequestTimeout)
+		defer cancel()
+
+		call := svc.People.ListDirectoryPeople().
+			Sources("DIRECTORY_SOURCE_TYPE_DOMAIN_PROFILE").
+			ReadMask("names,emailAddresses").
+			PageSize(c.Max).
+			Context(ctxTimeout)
+		if strings.TrimSpace(pageToken) != "" {
+			call = call.PageToken(pageToken)
+		}
+		resp, callErr := call.Do()
+		if callErr != nil {
+			if strings.Contains(callErr.Error(), "accessNotConfigured") ||
+				strings.Contains(callErr.Error(), "People API has not been used") {
+				return nil, "", fmt.Errorf("people API is not enabled; enable it at: %s (%w)", peopleAPIEnableURL, callErr)
+			}
+			return nil, "", callErr
+		}
+		return resp.People, resp.NextPageToken, nil
+	}
+
+	peopleList, nextPageToken, err := loadPagedItems(c.Page, c.All, fetch)
+	if err != nil {
+		return err
+	}
+
+	if outfmt.IsJSON(ctx) {
+		type item struct {
+			Email string `json:"email"`
+			Name  string `json:"name,omitempty"`
+		}
+		items := make([]item, 0, len(peopleList))
+		for _, p := range peopleList {
+			if p == nil {
+				continue
+			}
+			email := primaryEmail(p)
+			if email == "" {
+				continue
+			}
+			items = append(items, item{
+				Email: email,
+				Name:  primaryName(p),
+			})
+		}
+		if err := outfmt.WriteJSON(ctx, stdoutWriter(ctx), map[string]any{
+			"users":         items,
+			"nextPageToken": nextPageToken,
+		}); err != nil {
+			return err
+		}
+		if len(items) == 0 {
+			return failEmptyExit(c.FailEmpty)
+		}
+		return nil
+	}
+
+	if len(peopleList) == 0 {
+		u.Err().Println("No workspace users found")
+		return failEmptyExit(c.FailEmpty)
+	}
+
+	rows := calendarUserRows(peopleList)
+	if err := outfmt.WriteTable(ctx, stdoutWriter(ctx), rows, calendarUserColumns()); err != nil {
+		return err
+	}
+	printNextPageHintWithAll(u, nextPageToken, "--all/--all-pages")
+
+	u.Err().Println("\nTip: Use any email above as a calendar ID, e.g.:")
+	if len(rows) > 0 {
+		u.Err().Linef("  gog calendar events %s", rows[0].Email)
+	}
+
+	return nil
+}

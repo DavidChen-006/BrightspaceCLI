@@ -1,0 +1,252 @@
+package cmd
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"google.golang.org/api/drive/v3"
+)
+
+func TestExecute_DriveGet_JSON(t *testing.T) {
+	svc, closeSrv := newDriveTestService(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// google.golang.org/api/drive sometimes uses basepaths with or without /drive/v3.
+		// For this test we accept any GET and return the metadata payload.
+		if r.Method != http.MethodGet {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":           "id1",
+			"name":         "Doc",
+			"mimeType":     "application/pdf",
+			"size":         "1024",
+			"modifiedTime": "2025-12-12T14:37:47Z",
+			"createdTime":  "2025-12-11T00:00:00Z",
+			"starred":      true,
+		})
+	}))
+	defer closeSrv()
+
+	result := executeWithDriveTestService(t, []string{"--json", "--account", "a@b.com", "drive", "get", "id1"}, svc)
+	if result.err != nil {
+		t.Fatalf("Execute: %v\nstderr=%s", result.err, result.stderr)
+	}
+
+	var parsed struct {
+		File struct {
+			ID      string `json:"id"`
+			Name    string `json:"name"`
+			Starred bool   `json:"starred"`
+		} `json:"file"`
+	}
+	if err := json.Unmarshal([]byte(result.stdout), &parsed); err != nil {
+		t.Fatalf("json parse: %v\nout=%q", err, result.stdout)
+	}
+	if parsed.File.ID != "id1" || parsed.File.Name != "Doc" || !parsed.File.Starred {
+		t.Fatalf("unexpected file: %#v", parsed.File)
+	}
+}
+
+func TestExecute_DriveDownload_JSON(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "xdg-config"))
+
+	svc, closeSrv := newDriveTestService(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Metadata fetch (Do()).
+		if r.Method != http.MethodGet {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":       "id1",
+			"name":     "file.bin",
+			"mimeType": "application/pdf",
+		})
+	}))
+	defer closeSrv()
+
+	download := func(context.Context, *drive.Service, string) (*http.Response, error) {
+		return &http.Response{
+			Status:     "200 OK",
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader("abc")),
+		}, nil
+	}
+
+	dest := filepath.Join(t.TempDir(), "out.bin")
+	result := executeWithDriveTestOperations(t, []string{"--json", "--account", "a@b.com", "drive", "download", "id1", "--out", dest}, svc, download, nil)
+	if result.err != nil {
+		t.Fatalf("Execute: %v", result.err)
+	}
+
+	var parsed struct {
+		Path string `json:"path"`
+		Size int64  `json:"size"`
+	}
+	if err := json.Unmarshal([]byte(result.stdout), &parsed); err != nil {
+		t.Fatalf("json parse: %v\nout=%q", err, result.stdout)
+	}
+	if parsed.Path != dest || parsed.Size != 3 {
+		t.Fatalf("unexpected: %#v", parsed)
+	}
+	if b, err := os.ReadFile(dest); err != nil || string(b) != "abc" {
+		t.Fatalf("file mismatch: err=%v body=%q", err, string(b))
+	}
+}
+
+func TestDriveDownloadCmd_FileHasNoName(t *testing.T) {
+	svc, closeSrv := newDriveTestService(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":       "id1",
+			"name":     "",
+			"mimeType": "application/pdf",
+		})
+	}))
+	defer closeSrv()
+
+	flags := &RootFlags{Account: "a@b.com"}
+	ctx := withDriveTestService(newCmdRuntimeOutputContext(t, io.Discard, io.Discard), svc)
+
+	if execErr := runKong(t, &DriveDownloadCmd{}, []string{"id1", "--out", filepath.Join(t.TempDir(), "out.bin")}, ctx, flags); execErr == nil || !strings.Contains(execErr.Error(), "file has no name") {
+		t.Fatalf("expected file has no name error, got: %v", execErr)
+	}
+}
+
+func TestExecute_DriveDownload_GoogleSheet_PDF(t *testing.T) {
+	svc, closeSrv := newDriveTestService(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Metadata fetch (Do()).
+		if r.Method != http.MethodGet {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":       "sheet1",
+			"name":     "Sheet Name",
+			"mimeType": "application/vnd.google-apps.spreadsheet",
+		})
+	}))
+	defer closeSrv()
+
+	var gotMime string
+	export := func(_ context.Context, _ *drive.Service, fileID string, mimeType string) (*http.Response, error) {
+		if fileID != "sheet1" {
+			t.Fatalf("fileID=%q", fileID)
+		}
+		gotMime = mimeType
+		return &http.Response{
+			Status:     "200 OK",
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader("%PDF-FAKE")),
+		}, nil
+	}
+
+	dest := filepath.Join(t.TempDir(), "out")
+	result := executeWithDriveTestOperations(t, []string{"--json", "--account", "a@b.com", "drive", "download", "sheet1", "--format", "pdf", "--out", dest}, svc, nil, export)
+	if result.err != nil {
+		t.Fatalf("Execute: %v", result.err)
+	}
+
+	if gotMime != "application/pdf" {
+		t.Fatalf("mimeType=%q", gotMime)
+	}
+
+	var parsed struct {
+		Path string `json:"path"`
+		Size int64  `json:"size"`
+	}
+	if err := json.Unmarshal([]byte(result.stdout), &parsed); err != nil {
+		t.Fatalf("json parse: %v\nout=%q", err, result.stdout)
+	}
+	if !strings.HasSuffix(parsed.Path, ".pdf") {
+		t.Fatalf("expected .pdf path, got %q", parsed.Path)
+	}
+	if parsed.Size != int64(len("%PDF-FAKE")) {
+		t.Fatalf("size=%d", parsed.Size)
+	}
+	if b, err := os.ReadFile(parsed.Path); err != nil || string(b) != "%PDF-FAKE" {
+		t.Fatalf("file mismatch: err=%v body=%q", err, string(b))
+	}
+}
+
+func TestExecute_DriveDownload_GoogleDoc_DOCX(t *testing.T) {
+	assertDriveDownloadGoogleFile(t,
+		"doc1", "My Doc", "application/vnd.google-apps.document", "docx",
+		"application/vnd.openxmlformats-officedocument.wordprocessingml.document", ".docx", "DOCX-FAKE",
+	)
+}
+
+func TestExecute_DriveDownload_GoogleSlides_PPTX(t *testing.T) {
+	assertDriveDownloadGoogleFile(t,
+		"slides1", "My Slides", "application/vnd.google-apps.presentation", "pptx",
+		"application/vnd.openxmlformats-officedocument.presentationml.presentation", ".pptx", "PPTX-FAKE",
+	)
+}
+
+func assertDriveDownloadGoogleFile(t *testing.T, fileID, name, googleMime, format, exportMime, extension, body string) {
+	t.Helper()
+	svc, closeSrv := newDriveTestService(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":       fileID,
+			"name":     name,
+			"mimeType": googleMime,
+		})
+	}))
+	defer closeSrv()
+
+	var gotMime string
+	export := func(_ context.Context, _ *drive.Service, gotFileID string, mimeType string) (*http.Response, error) {
+		if gotFileID != fileID {
+			t.Fatalf("fileID=%q", gotFileID)
+		}
+		gotMime = mimeType
+		return &http.Response{
+			Status:     "200 OK",
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(body)),
+		}, nil
+	}
+
+	dest := filepath.Join(t.TempDir(), "out")
+	result := executeWithDriveTestOperations(t, []string{"--json", "--account", "a@b.com", "drive", "download", fileID, "--format", format, "--out", dest}, svc, nil, export)
+	if result.err != nil {
+		t.Fatalf("Execute: %v", result.err)
+	}
+
+	if gotMime != exportMime {
+		t.Fatalf("mimeType=%q", gotMime)
+	}
+
+	var parsed struct {
+		Path string `json:"path"`
+		Size int64  `json:"size"`
+	}
+	if err := json.Unmarshal([]byte(result.stdout), &parsed); err != nil {
+		t.Fatalf("json parse: %v\nout=%q", err, result.stdout)
+	}
+	if !strings.HasSuffix(parsed.Path, extension) {
+		t.Fatalf("expected %s path, got %q", extension, parsed.Path)
+	}
+	if b, err := os.ReadFile(parsed.Path); err != nil || string(b) != body {
+		t.Fatalf("file mismatch: err=%v body=%q", err, string(b))
+	}
+}

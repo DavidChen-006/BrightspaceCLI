@@ -1,0 +1,26 @@
+{
+  "name": "gog-email-tracker",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "format": "oxfmt --write .",
+    "format:check": "oxfmt --check .",
+    "lint": "pnpm format:check && oxlint --deny-warnings .",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "wrangler deploy --dry-run",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260827.1",
+    "@typescript/native": "npm:typescript@^7.0.2",
+    "oxfmt": "^0.65.0",
+    "oxlint": "^1.80.0",
+    "oxlint-tsgolint": "^7.0.2001",
+    "typescript": "npm:@typescript/typescript6@^6.0.2",
+    "vitest": "^4.1.11",
+    "wrangler": "^4.126.0"
+  },
+  "packageManager": "pnpm@11.24.0"
+}
