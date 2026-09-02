@@ -22,6 +22,9 @@ sections your ticket cites before writing code.
   the payload as decoded, `--select` ignored, `--wrap-untrusted` still applied).
 - `src/cli/commands/whoami.ts`, `src/cli/commands/courses.ts` — `bs whoami`, `bs courses list|get`
   (bs-0am): thin actions that parse flags, call `src/d2l/` through `withData`, shape, emit.
+- `src/cli/commands/quizzes.ts` — `bs quizzes list|get|attempts <ou> [<quizId>]` (bs-440): `list`
+  walks `Next`; `get` maps 404 to a `bs quizzes list <ou>` hint; `attempts` calls `whoami` first for
+  `?userId=` and rewrites a 403 with the learner-access caveat plus the quiz deep link.
 - `src/core/paths.ts` — the single layout decision (PRD 8.1). Resolution is pure;
   `ensureDirs()` creates 0700 dirs and is never called by `--help`, `version`, `schema`.
 - `src/core/config.ts` — tenant knobs (PRD 8.3): flags > `BS_*` env > `config.json` > defaults.
@@ -58,6 +61,13 @@ sections your ticket cites before writing code.
   parsers `courseOf()`/`courseDetailOf()` onto the PRD 6.3 Course shape (every value read, only
   `url` computed, dates through `isoSeconds`). Route helpers take `(http, cfg, ...)` where `cfg`
   is the tenant config (versions from `lpVersion`/`leVersion`, never hard-coded).
+  `quizzes.ts`: `LeTenant`, `quizzesUrl()`/`quizItemUrl()`/`quizAttemptsUrl()`, `listQuizzes()` and
+  `listAttempts()` (async iterables over `objectListPage`, which rejects the dropbox bare-array
+  shape), `getQuiz()`, and the pure parsers `quizOf()`/`quizDetailOf()`/`attemptOf()` onto the PRD
+  6.3 Item shape with `kind: 'quiz'` (`attemptsAllowed`/`unlimitedAttempts` from `AttemptsAllowed`,
+  `timeLimit` from `SubmissionTimeLimit`; rich text read from either `{Text:{Text,Html},IsDisplayed}`
+  or flat `{Text,Html}`; `instructions`/`feedback` are text only so every free-text key is one
+  `--wrap-untrusted` wraps).
 - `src/schema/schema.ts` — `bs schema --json` from the live commander tree.
 - `src/buildinfo.ts` — version from `package.json`; commit/date from `dist/buildinfo.json`
   (written by `scripts/buildinfo.mjs` during `npm run build`; "unknown" in dev).
