@@ -31,6 +31,21 @@ sections your ticket cites before writing code.
   object fields with a warning; both failing reports the objects' error: 403 → 6, 404 → 5). `final`
   emits the released final grade or the `released: false` shape with exit 0 (3 under
   `--fail-empty`). `--plain` flattens `associatedTool`/`myValue` into one row per item.
+- `src/cli/commands/assignments.ts` — `bs assignments list|get|submissions|download` (bs-e4i).
+  `list`/`submissions` decode the bare arrays into the PRD Item (`kind: 'assignment'`) and
+  Submission shapes (undecodable items skipped with a warning; none decodable → exit 1);
+  `get` adds `instructions {text, html}`, `attachments`, `linkAttachments`, `availability`
+  (null-safe) and decoded enums; 404 → exit 5 with a `bs assignments list <ou>` hint, 403 →
+  exit 6 (past-term). RichText fields are emitted as `{text, html}` so both forms wrap under
+  `--wrap-untrusted`. `download <ou> <folderId> <fileId> [--submission <sid>] [--out path|-]
+  [--force]` streams one file via `requestStream` (attachment route, or the submission-file
+  route with `--submission`): `--out` is a directory (existing or trailing slash, created on
+  demand), a file path, or `-` for raw bytes on stdout (refused with `--json`/`--plain`,
+  exit 2); the name comes from `Content-Disposition` (RFC 6266 `filename*` first), sanitised
+  to one path component, fallback `file-<fileId>`; existing files are never overwritten
+  without `--force` (exit 2); the summary is `{fileId, submissionId, fileName, path, bytes,
+  contentType}`. Bytes reach stdout through a local `ByteSink` cast because `Sink` only
+  promises strings.
 - `src/core/paths.ts` — the single layout decision (PRD 8.1). Resolution is pure;
   `ensureDirs()` creates 0700 dirs and is never called by `--help`, `version`, `schema`.
 - `src/core/config.ts` — tenant knobs (PRD 8.3): flags > `BS_*` env > `config.json` > defaults.
@@ -96,6 +111,13 @@ sections your ticket cites before writing code.
   pure parsers `gradeTypeOf()` (GRADEOBJ_T 1..9 incl. the tenant's category row, numeric
   `GradeObjectTypeId` before the docs' `GradeType` string), `gradeValueOf()`, `gradeOf()`,
   `joinGrades()` (objects keep their order, orphan values follow) and `finalGradeOf()`.
+  `assignments.ts`: `LeTenant`, the dropbox routes (`foldersUrl()` bare array, `folderUrl()`,
+  `mySubmissionsUrl()`, `attachmentUrl()`, `submissionFileUrl()`), `listFolders()` /
+  `getFolder()` / `listMySubmissions()` (a non-array 2xx is a shape error), the pure parsers
+  `assignmentOf()` / `assignmentDetailOf()` / `submissionOf()` (`Id` and `Name` fatal, every
+  other field survives as null; `url` is always `assignmentUrl()`, never
+  `LinkAttachments[].Href`), `enumName()` (int index or name → canonical name) and the
+  download helpers `contentDispositionFilename()` / `safeFileName()`.
 - `src/schema/schema.ts` — `bs schema --json` from the live commander tree.
 - `src/buildinfo.ts` — version from `package.json`; commit/date from `dist/buildinfo.json`
   (written by `scripts/buildinfo.mjs` during `npm run build`; "unknown" in dev).

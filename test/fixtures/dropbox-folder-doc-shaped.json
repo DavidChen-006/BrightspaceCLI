@@ -1,0 +1,43 @@
+{
+  "Id": 700001,
+  "CategoryId": 12,
+  "Name": "Homework 3",
+  "CustomInstructions": {
+    "Text": "Submit a PDF of your solutions. Show your work.",
+    "Html": "<p>Submit a <strong>PDF</strong> of your solutions. Show your work.</p>"
+  },
+  "Attachments": [
+    { "FileId": 90001, "FileName": "hw3-problems.pdf", "Size": 184320 },
+    { "FileId": 90002, "FileName": "starter code.zip", "Size": 40960 }
+  ],
+  "TotalFiles": -1,
+  "UnreadFiles": -1,
+  "FlaggedFiles": -1,
+  "TotalUsers": -1,
+  "TotalUsersWithSubmissions": -1,
+  "TotalUsersWithFeedback": -1,
+  "Availability": {
+    "StartDate": "2026-02-15T05:00:00.000Z",
+    "EndDate": "2026-03-08T04:59:00.000Z",
+    "StartDateAvailabilityType": 0,
+    "EndDateAvailabilityType": "SubmissionRestricted"
+  },
+  "IsHidden": false,
+  "Assessment": { "ScoreDenominator": 100, "Rubrics": [] },
+  "DropboxType": 2,
+  "GroupTypeId": null,
+  "DueDate": "2026-03-01T04:59:00.000Z",
+  "DisplayInCalendar": true,
+  "NotificationEmail": null,
+  "LinkAttachments": [
+    { "LinkId": 99001, "LinkName": "Course style guide", "Href": "https://example.invalid/style-guide" }
+  ],
+  "ActivityId": "https://ids.brightspace.com/activities/dropbox/AAAA-700001",
+  "IsAnonymous": false,
+  "SubmissionType": 0,
+  "CompletionType": 0,
+  "AllowableFileType": 0,
+  "CustomAllowableFileTypes": null,
+  "GradeItemId": 8801,
+  "AllowOnlyUsersWithSpecialAccess": null
+}
