@@ -25,8 +25,10 @@ import {
   type StreamOutcome,
   toError,
 } from '../core/http/index.js';
-import { isRecord, optionalBoolean, optionalString } from './common.js';
-import type { LeTenant } from './quizzes.js';
+import { isRecord, type LeTenant, optionalBoolean, optionalString } from './common.js';
+
+/** The LE tenant view lives in `common.ts`; re-exported so existing imports keep resolving. */
+export type { LeTenant } from './common.js';
 
 // ---------------------------------------------------------------------------------------------
 // Wire shapes (documented fields only; parsers tolerate anything missing)

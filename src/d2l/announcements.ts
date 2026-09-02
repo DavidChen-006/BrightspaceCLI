@@ -11,7 +11,6 @@
  *   server order is observed, not promised. Attachment sizes read `FileSize` (the documented
  *   key) then `Size` (what the tenant actually sends).
  */
-import type { TenantConfig } from '../core/config.js';
 import { isoSeconds, toD2lDateTime } from '../core/dates.js';
 import { BsError } from '../core/errors.js';
 import {
@@ -23,11 +22,11 @@ import {
   type Query,
   toError,
 } from '../core/http/index.js';
-import { isRecord, optionalBoolean, optionalString } from './common.js';
+import { isRecord, type LeTenant, optionalBoolean, optionalString } from './common.js';
 import { announcementsUrl } from './links.js';
 
-/** What an LE route needs to know about the tenant. */
-export type LeTenant = Pick<TenantConfig, 'baseUrl' | 'leVersion'>;
+/** The LE tenant view lives in `common.ts`; re-exported so existing imports keep resolving. */
+export type { LeTenant } from './common.js';
 
 // ---------------------------------------------------------------------------------------------
 // Wire shapes (documented fields only; parsers tolerate anything missing)

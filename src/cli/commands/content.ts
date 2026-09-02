@@ -22,6 +22,7 @@ import {
 } from '../../core/errors.js';
 import { classify, type HttpClient, type HttpStream, toError } from '../../core/http/index.js';
 import { type Row, Table } from '../../core/output.js';
+import type { LeTenant } from '../../d2l/common.js';
 import {
   fileNameFromTopicUrl,
   filenameFromContentDisposition,
@@ -41,7 +42,6 @@ import {
   tocTree,
   topicDetailOf,
 } from '../../d2l/content.js';
-import type { LeTenant } from '../../d2l/quizzes.js';
 import { type CliContext, emit } from '../context.js';
 import { emitList, emitRaw, listEnvelope, withData } from '../data.js';
 import { parsePositiveInt, typed } from '../options.js';

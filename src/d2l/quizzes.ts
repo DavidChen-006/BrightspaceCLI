@@ -12,14 +12,13 @@
  *   values; the other keys follow the docs and the parsers tolerate either rich-text nesting
  *   (`{Text:{Text,Html},IsDisplayed}` per the docs, or flat `{Text,Html}` as recorded).
  */
-import type { TenantConfig } from '../core/config.js';
 import { isoSeconds } from '../core/dates.js';
 import { d2lUrl, type HttpClient, objectListPage, type PageOptions } from '../core/http/index.js';
-import { d2lId, isRecord, optionalBoolean, optionalString } from './common.js';
+import { d2lId, isRecord, type LeTenant, optionalBoolean, optionalString } from './common.js';
 import { quizUrl } from './links.js';
 
-/** What an LE route needs to know about the tenant. */
-export type LeTenant = Pick<TenantConfig, 'baseUrl' | 'leVersion'>;
+/** The LE tenant view lives in `common.ts`; re-exported so existing imports keep resolving. */
+export type { LeTenant } from './common.js';
 
 // ---------------------------------------------------------------------------------------------
 // Wire shapes (documented fields only; parsers tolerate anything missing)
