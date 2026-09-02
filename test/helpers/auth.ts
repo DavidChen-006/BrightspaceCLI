@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { Readable } from 'node:stream';
 import type { Session, SessionCookie } from '../../src/auth/session.js';
 import { buildCookieHeader } from '../../src/auth/session.js';
 import { type BsPaths, resolvePaths } from '../../src/core/paths.js';
@@ -100,3 +101,20 @@ export const bogusBearerStep: Step = {
   headers: { 'content-type': 'application/problem+json' },
   body: BOGUS_BEARER.body,
 };
+
+/**
+ * A prompt-friendly stdin: one chunk per line with an event-loop turn between them, so the
+ * readline used for the email line cannot swallow the password line that follows it.
+ */
+export function promptStdin(lines: readonly string[]): NodeJS.ReadableStream {
+  const tick = () => new Promise<void>((resolve) => setImmediate(resolve));
+  return Readable.from(
+    (async function* () {
+      for (const line of lines) {
+        yield line;
+        await tick();
+        await tick();
+      }
+    })(),
+  );
+}
