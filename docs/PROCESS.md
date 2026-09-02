@@ -39,12 +39,15 @@ probing the tools (`bd` 1.0.3, `treehouse` 2.3.0) on 2026-09-02.
    goes silent).
 4. Subagent works red→green (tests first), commits on `bead/<id>`, runs
    `npm test`, then `bd close <id> --reason "<summary>"`.
-5. Orchestrator verifies personally: `bd show <id> --json` is closed; in the
-   main checkout `git merge --no-ff bead/<id>`; run `npm run build && npm
-   test`; review the diff. Failing review → reopen the bead with notes
-   (`bd reopen`, `bd note`) and re-dispatch to a new subagent in the same
-   worktree.
-6. `treehouse return --force <path>`; delete the merged branch.
+5. Orchestrator verifies personally: `bd show <id> --json` is closed; run
+   `npm run build && npm test && npm run lint` on the branch; review the
+   diff. Failing review → reopen the bead with notes (`bd reopen`, `bd note`)
+   and re-dispatch to a new subagent in the same worktree.
+6. In the main checkout: `git merge --no-ff bead/<id> -m "merge: <id> <title>"`
+   so every ticket lands as one merge commit, then **`git push origin main`
+   immediately** — the pushed history is the progress record (user
+   requirement, 2026-09-02).
+7. `treehouse return --force <path>`; delete the merged branch.
 7. Repeat until `bd ready` is empty and `bd list --status open` is empty.
 
 ## Agile rules for a ticket subagent
