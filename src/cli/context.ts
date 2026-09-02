@@ -3,6 +3,7 @@
  * flags, lazily resolved paths/config, and the one output seam (`emit`).
  */
 import type { Rung } from '../auth/ladder.js';
+import type { FullRungFactory } from '../auth/rungs/full.js';
 import { silentRung } from '../auth/rungs/silent.js';
 import { loadConfig, type TenantConfig } from '../core/config.js';
 import { createHttp, type HttpClient, type Transport } from '../core/http/index.js';
@@ -76,6 +77,11 @@ export interface RunIO {
   transport?: Transport;
   /** Test injection only; defaults to the silent rung (`ctx.rungs`). */
   rungs?: Rung[];
+  /**
+   * Test injection only: how `bs auth login` builds its full rung (defaults to `fullRung()` in
+   * `src/auth/rungs/full.ts`). Never a rung in `rungs`: no other command may climb it.
+   */
+  fullRung?: FullRungFactory;
 }
 
 export interface CliContext extends RunIO {
@@ -113,6 +119,7 @@ export function createContext(io: Partial<RunIO> = {}): CliContext {
     cwd: io.cwd ?? process.cwd(),
     stdin: io.stdin ?? process.stdin,
     transport: io.transport,
+    fullRung: io.fullRung,
   };
   let paths: BsPaths | undefined;
   let config: TenantConfig | undefined;

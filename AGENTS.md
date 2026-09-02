@@ -20,6 +20,13 @@ sections your ticket cites before writing code.
   no data request; never opens a browser), `listEnvelope()`/`emitList()` (PRD 6.3 `{items, count,
   fetchedAt}` plus `--fail-empty` → exit 3 after the output is written) and `emitRaw()` (`--raw`:
   the payload as decoded, `--select` ignored, `--wrap-untrusted` still applied).
+- `src/cli/commands/auth.ts` — `bs auth status|refresh|login|logout`. `login` is the ONLY
+  command that climbs the full rung: it resolves credentials first (so a non-interactive run
+  with nothing to type is exit 4 before any browser), builds the full rung inside the action
+  (`ctx.fullRung ?? fullRung`, never from `ctx.rungs`, so the silent path runs once, inside the
+  full rung), runs `climb` with `allowFull: true`, prints the `auth status` shape, and maps
+  `rung.failure` to a specific hint (exit 4). `--save-credentials` writes `credentials.json`
+  only after a successful login. The MFA relay is a plain stderr line via `ctx.log`.
 - `src/cli/commands/whoami.ts`, `src/cli/commands/courses.ts` — `bs whoami`, `bs courses list|get`
   (bs-0am): thin actions that parse flags, call `src/d2l/` through `withData`, shape, emit.
 - `src/core/paths.ts` — the single layout decision (PRD 8.1). Resolution is pure;
@@ -65,6 +72,24 @@ sections your ticket cites before writing code.
   (tests get `rungs: []` from `test/helpers/cli.ts`, so no test ever opens a real browser) and
   `RunIO.stdin` feeds prompts. `test/helpers/browser.ts` is the scripted `FakeBrowser`
   (surfaces, clicks, waits on a fake clock, a fake importer).
+  `full.ts`: `fullRung(input, deps)` (`kind: 'full'`, PRD 7 rung 2): silent path first, then
+  the Entra choreography (email → `#idSIButton9` → password → submit, each field polled 250 ms up
+  to 30 s), then the number-match loop (2 s up to 5 min: read `#idRichContext_DisplaySign`
+  BEFORE the auth check, announce `Type NN into Authenticator on your phone` on change through
+  `input.announce`, write `cache/mfa.json {number, mintedAt}` 0600, click KMSI, check auth,
+  harvest). `cache/mfa.json` is cleared before the attempt and in `finally`; its writes are
+  guarded. Failures are a null plus one `warn` line plus `rung.failure` (`bad-password`,
+  `unknown-account`, `mfa-timeout`, `mfa-denied`, `no-field`, `no-xsrf`, `browser`, `error`) so
+  `bs auth login` can hint. Headless unless `input.headed`. `RunIO.fullRung` is the test seam
+  for how `bs auth login` builds it; `createContext()` never registers a full rung.
+- `src/auth/credentials.ts` — where `bs auth login` gets its credentials, in one fixed order:
+  `BS_EMAIL` + `BS_PASSWORD` (both or neither; one alone is `ConfigError` exit 10) →
+  `--email` + `--password-stdin` (whole stdin, one trailing newline trimmed) → `credentials.json`
+  (`readCredentialsFile()`; corrupt = absent) → a TTY prompt on stderr (readline for the email,
+  closed before the raw-mode masked password read) → no terminal / `--no-input` is
+  `AuthRequiredError` exit 4 at once with `HINT_CREDENTIALS`. `writeCredentialsFile()` (atomic,
+  0600) is the only writer and only `--save-credentials` calls it. The password never reaches a
+  log, a prompt echo, or an error message.
 - `src/d2l/` — the typed D2L route layer commands call (one file per resource, evidence in
   `docs/evidence/d2l-api-web.md`). `common.ts`: `LpTenant`, `d2lId()` (string D2LID → number when
   numeric), `orgUnitRefOf()`. `links.ts`: every deep-link template from PRD 6.3 (`courseHomeUrl`,
