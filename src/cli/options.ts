@@ -26,6 +26,14 @@ export function parseTimeout(value: string): number {
   return n;
 }
 
+/** `--limit <n>` and friends: a positive integer or a usage error. */
+export function parsePositiveInt(value: string): number {
+  if (!/^\d+$/.test(value.trim()) || Number(value) <= 0) {
+    throw new InvalidArgumentError('expected a positive integer.');
+  }
+  return Number(value);
+}
+
 export function parseSelect(value: string): string[] {
   const paths = value
     .split(',')
