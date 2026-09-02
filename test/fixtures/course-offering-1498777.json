@@ -1,0 +1,20 @@
+{
+  "Identifier": "1498777",
+  "Name": "Spring 2026 PHIL 49000-003 LEC",
+  "Code": "wl.202620.PHIL.49000.003",
+  "IsActive": true,
+  "Path": "/content/enforced/1498777-wl.202620.PHIL.49000.003/",
+  "StartDate": "2026-01-07T05:00:00.000Z",
+  "EndDate": "2026-05-24T03:59:00.000Z",
+  "LocaleId": null,
+  "ForceLocale": false,
+  "CourseTemplate": { "Identifier": "1498770", "Name": "PHIL 49000", "Code": "wl.PHIL.49000" },
+  "Semester": { "Identifier": "1480001", "Name": "Spring 2026", "Code": "202620" },
+  "Department": { "Identifier": "6813", "Name": "Philosophy", "Code": "PHIL" },
+  "Description": {
+    "Text": "Seminar on the philosophy of mind. Weekly response papers are due Sundays at 23:59.",
+    "Html": "<p>Seminar on the <em>philosophy of mind</em>. Weekly response papers are due Sundays at 23:59.</p>"
+  },
+  "CanSelfRegister": false,
+  "ShowAddressBook": false
+}
