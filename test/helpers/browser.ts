@@ -34,6 +34,8 @@ export interface Surface {
   onClick?: Record<string, string>;
   /** After this many `waitForTimeout` calls here, move on (an SSO redirect landing). */
   afterWaits?: { count: number; next: string };
+  /** `textContent()` per selector (the number-match digits, an Entra error message). */
+  text?: Record<string, string>;
 }
 
 interface Target {
@@ -63,6 +65,8 @@ export class FakeBrowser {
   /** Every page/context call in order: `goto <url>`, `click <key>`, `wait <ms>`, `evaluate <label>`. */
   readonly calls: string[] = [];
   readonly launches: { dir: string; options: Record<string, unknown> }[] = [];
+  /** Every `fill` by selector, in order (values are what the rung typed; tests check them). */
+  readonly filled: { selector: string; value: string }[] = [];
   closed = 0;
   now: number;
   readonly page: PageLike;
@@ -179,6 +183,16 @@ export class FakeBrowser {
         const next = hit === undefined ? undefined : onClick[hit];
         if (next !== undefined) this.moveTo(next);
       },
+      fill: async (value) => {
+        // The value is recorded for assertions but deliberately kept out of `calls`.
+        this.calls.push(`fill ${key}`);
+        this.filled.push({ selector: key, value });
+      },
+      textContent: async () => {
+        const text = this.current.text ?? {};
+        const hit = Object.keys(text).find((k) => matches(k, target));
+        return hit === undefined ? null : (text[hit] ?? null);
+      },
     };
     return loc;
   }
@@ -266,6 +280,72 @@ export function emailSurface(): Surface {
     url: 'https://login.microsoftonline.com/common/oauth2/authorize?client_id=x',
     visible: ['#i0116', 'input[type=email]', '#idSIButton9'],
   };
+}
+
+/** Entra's email prompt with a working Next button: `#idSIButton9` lands on `next`. */
+export function entraEmailSurface(next: string): Surface {
+  return { ...emailSurface(), onClick: { '#idSIButton9': next } };
+}
+
+/** Entra's password page; "Sign in" lands on `next`. */
+export function entraPasswordSurface(next: string): Surface {
+  return {
+    name: 'password',
+    url: 'https://login.microsoftonline.com/common/login',
+    visible: ['#i0118', 'input[type=password]', 'input[name=passwd]', '#idSIButton9'],
+    onClick: { '#idSIButton9': next },
+  };
+}
+
+/** Entra's password page re-rendered with the wrong-password error under the field. */
+export function passwordErrorSurface(): Surface {
+  return {
+    name: 'password-error',
+    url: 'https://login.microsoftonline.com/common/login',
+    visible: ['#i0118', 'input[type=password]', '#idSIButton9', '#passwordError'],
+    text: { '#passwordError': 'Your account or password is incorrect.' },
+  };
+}
+
+/** Entra's number-match page showing `number`; optionally moves on after some polls. */
+export function mfaSurface(
+  name: string,
+  number: string,
+  afterWaits?: { count: number; next: string },
+): Surface {
+  const surface: Surface = {
+    name,
+    url: 'https://login.microsoftonline.com/common/login',
+    visible: ['#idRichContext_DisplaySign'],
+    text: { '#idRichContext_DisplaySign': ` ${number} ` },
+  };
+  if (afterWaits) surface.afterWaits = afterWaits;
+  return surface;
+}
+
+/** Entra's number-match page after the request was denied or expired on the phone. */
+export function mfaErrorSurface(
+  message = "We didn't hear from you. Please sign in again.",
+): Surface {
+  return {
+    name: 'mfa-error',
+    url: 'https://login.microsoftonline.com/common/login',
+    visible: ['#idDiv_SAOTCAS_ErrorText'],
+    text: { '#idDiv_SAOTCAS_ErrorText': message },
+  };
+}
+
+/** The complete credential chain: campus → email → password → number-match → KMSI → home. */
+export function entraChain(): Surface[] {
+  return [
+    loginSurface('email'),
+    entraEmailSurface('password'),
+    entraPasswordSurface('mfa1'),
+    mfaSurface('mfa1', '72', { count: 2, next: 'mfa2' }),
+    mfaSurface('mfa2', '68', { count: 2, next: 'kmsi' }),
+    kmsiSurface('home', '#KmsiCheckboxField'),
+    homeSurface(),
+  ];
 }
 
 /** The complete silent chain: campus selector → SSO → KMSI → authenticated home. */

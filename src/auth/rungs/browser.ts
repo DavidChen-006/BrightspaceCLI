@@ -20,6 +20,10 @@ export interface LocatorLike {
   first(): LocatorLike;
   isVisible(): Promise<boolean>;
   click(): Promise<void>;
+  /** Types a value into a field (the full rung's email and password); the value is never logged. */
+  fill(value: string): Promise<void>;
+  /** The element's text (the full rung's number-match digits); null when absent. */
+  textContent(): Promise<string | null>;
 }
 
 /** What playwright's `BrowserContext.cookies()` yields, minus `sameSite`. */
