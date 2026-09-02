@@ -22,7 +22,9 @@
     "test": "node --test --import tsx \"test/**/*.test.ts\"",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
-    "typecheck": "tsc -p tsconfig.test.json"
+    "typecheck": "tsc -p tsconfig.test.json",
+    "skill": "npm run build && node dist/bin/bs.js skill > skills/bs/SKILL.md",
+    "skill:check": "npm run build && node dist/bin/bs.js skill --check"
   },
   "license": "MIT",
   "dependencies": {

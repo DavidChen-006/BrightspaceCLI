@@ -39,13 +39,15 @@ test('the probe detects playwright-core when it is imported (positive control)',
   }
 });
 
-test('--help, version, schema, auth status and auth doctor --help never load playwright-core', async () => {
+test('--help, version, schema, skill, auth status and auth doctor --help never load playwright-core', async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), 'bs-probe-'));
   try {
     const cases: [string[], number][] = [
       [['--help'], 0],
       [['version', '--json'], 0],
       [['schema', '--json'], 0],
+      [['skill'], 0],
+      [['skill', '--json'], 0],
       [['auth', 'status', '--json'], 4],
       [['auth', 'doctor', '--help'], 0],
     ];
