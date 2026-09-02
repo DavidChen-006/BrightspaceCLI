@@ -82,11 +82,11 @@ sections your ticket cites before writing code.
   is one GET on `news/` (bare array, no paging) with `--since` (ISO timestamp, `YYYY-MM-DD`, or a
   duration `7d|36h|90m|2w` via `parseSince`) and `--limit` (default 20, applied after the
   newest-first sort); `get <ou> <newsId>` is a filter of that list (D2L has no single-item news
-  route; an unknown or draft id is exit 5); `download <ou> <newsId> [fileId] [--out <dir>]`
-  streams every attachment (or the one `fileId`) through `requestStream` into `--out` (created
-  if missing) via a `.part` temp file + rename, and emits `{fileId, fileName, path, bytes}` rows.
-  `safeFileName()` (basename only, control characters and leading dots stripped, length-capped,
-  fallback `attachment-<fileId>`) and `writeStreamToFile()` live here until a sibling needs them.
+  route; an unknown or draft id is exit 5); `download <ou> <newsId> [fileId] [--out <dir>]
+  [--force]` streams every attachment (or the one `fileId`) through `requestStream` and
+  `src/cli/download.ts` into `--out` (created if missing; names deduplicated within one run as
+  `<stem>-<fileId><ext>`, fallback `attachment-<fileId>`; an existing file is exit 2 without
+  `--force`), and emits `{fileId, fileName, path, bytes}` rows.
 - `src/cli/commands/calendar.ts` — `bs calendar events [ou...] [--from] [--to] [--type] [--limit]`
   (bs-bbc): one `calendar/events/myEvents/` ObjectListPage walk per chunk of <=100 org units
   (`orgUnitIdsCSV`, dates via `toD2lDateTime`, window default now → +30 days, `--type due` =
@@ -103,11 +103,6 @@ sections your ticket cites before writing code.
   reports the first error). `posts` pages with `pageNumbered` (`pageSize` default 100, max 1000;
   stop on a short page; `--limit` stops fetching). 404s carry the parent-listing hint
   (`bs discussions forums <ou>` / `bs discussions topics <ou> <forumId>`).
-  route; an unknown or draft id is exit 5); `download <ou> <newsId> [fileId] [--out <dir>]
-  [--force]` streams every attachment (or the one `fileId`) through `requestStream` and
-  `src/cli/download.ts` into `--out` (created if missing; names deduplicated within one run as
-  `<stem>-<fileId><ext>`, fallback `attachment-<fileId>`; an existing file is exit 2 without
-  `--force`), and emits `{fileId, fileName, path, bytes}` rows.
 - `src/cli/commands/upcoming.ts` — `bs upcoming [--days 14] [--kinds a,b] [--course <ou>]... [--limit n]`
   (bs-cv2), the one workflow command (PRD 6.2 upcoming row, 9 fan-out). Active courses come from
   `listEnrollments` (the `bs courses list` defaults; ids are deduped) or the repeatable `--course`
@@ -148,7 +143,8 @@ sections your ticket cites before writing code.
   payload's `OrgUnitName`, ...) and, on rows whose `kind` is `content`, `path` (module titles);
   `METADATA_KEYS`/suffixes (`id`, `url`, `fileName`, `uniqueName`, `mimeType`, dates) always win,
   so a download summary's filesystem `path` is never wrapped.
-- `src/core/http/` — the one HTTP seam (PRD 9), imported via `index.js`: `client.ts`
+- `src/core/http/` — the one HTTP seam (PRD 9), imported via `index.js`: `types.ts` (the
+  `Transport`/`HttpClient` seam types), `client.ts`
   (`createHttp()` with injectable transport/clock/sleep/random/log, read-only guard, retries,
   first-byte timeout, `withBearer`), `classify.ts` (`classify()`, `problemDetails()`, `readJson()`,
   `toError()` → BsError + exit code), `paginate.ts` (`pagedResultSet`, `objectListPage`,
@@ -281,7 +277,20 @@ sections your ticket cites before writing code.
   `candidateOf*()` adapters from the Assignment/Quiz/DiscussionTopic shapes, and the pure
   `mergeUpcoming(sources, {now, days}, courseNames)` (window inclusive at both ends, dedupe by
   `(kind, id)` first wins, sort by `dueDate`, `title`, `kind`, `id`; failures copied through).
+- `src/cli/commands/schema.ts`, `version.ts`, `whoami.ts` — the three side-effect-free commands
+  (`bs schema` is JSON only and rejects `--plain`; `bs version` prints `{version, commit, date}`).
+- `src/cli/commands/skill.ts` — `bs skill [--check [file]]` (bs-u1f): renders the agent SKILL.md
+  from the live schema and prints it on stdout (`--json` wraps it as `{markdown}`; the text is
+  local metadata, so `--wrap-untrusted` never applies). `--check` compares the render with
+  `skills/bs/SKILL.md` (or the given file): exit 0 when identical, exit 1 with the first
+  differing line and `Run: npm run skill` when stale. Creates no state dir, opens no browser.
 - `src/schema/schema.ts` — `bs schema --json` from the live commander tree.
+- `src/skill/render.ts` — `renderSkill(doc, {version})`, the pure renderer behind `bs skill`
+  (PRD 10.2). Nothing is hand-listed: the `| Command | Purpose |` table is the schema's leaf
+  commands in schema order, the exit-code table is `EXIT_CODES`, the env table is `CONFIG_ENV`
+  + `DEFAULT_CONFIG`. It renders the version but never the build commit or date, so the file is
+  byte-stable across builds. `leafCommands()`, `cleanCell()` (pipes escaped, newlines flattened)
+  and `firstDifference()` live here.
 - `src/buildinfo.ts` — version from `package.json`; commit/date from `dist/buildinfo.json`
   (written by `scripts/buildinfo.mjs` during `npm run build`; "unknown" in dev).
 - `test/**/*.test.ts` — hermetic `node:test` suites mirroring `src/` (`test/core/paths.test.ts`
@@ -289,17 +298,23 @@ sections your ticket cites before writing code.
   `transport` to script HTTP); `test/helpers/http.ts` fakes the transport; `test/helpers/auth.ts`
   builds fake sessions/JWTs, loads the auth fixtures and asserts secret-free output.
   `test/auth/no-playwright-load.test.ts` spawns `test/helpers/playwright-probe.ts` to prove
-  `--help`, `version`, `schema`, `auth status` and `auth doctor --help` never load `playwright-core`.
+  `--help`, `version`, `schema`, `skill`, `auth status` and `auth doctor --help` never load
+  `playwright-core`.
   `test/auth/doctor-command.test.ts` drives `bs auth doctor` with fake `RunIO.doctor` deps (no
   download, no launch) and a scripted versions probe.
   `test/fixtures/` holds recorded payloads with a provenance README. `test/live/` (behind
   `BS_LIVE=1`) is the only place that may touch the tenant.
+- `test/cli/skill.test.ts` — the SKILL.md render (required blocks, every schema leaf command in
+  the table exactly once, the footer without the commit), `--check` on a matching and a stale
+  file, the `--json` shape, and that the committed `skills/bs/SKILL.md` is the current render.
 - `test/cli/download.test.ts` — unit tests for the shared download plumbing (names, `--out`
   resolution, `.part` + rename, the overwrite rule, stdout sink backpressure).
 - `test/commands/<name>.test.ts` — hermetic command suites: seed a session in a temp `--root`
   (`tempRoot()` + `writeSession(fakeSession({jwt}))`), script HTTP with `fakeTransport`, assert
   on exit code, stdout, stderr and the recorded requests. `test/d2l/` unit-tests the pure
   builders and parsers on the recorded fixtures.
+- `skills/bs/SKILL.md` — generated by `npm run skill`; never edited by hand. `npm run skill:check`
+  fails the build when it is stale.
 - `reference/` — vendored reference projects (read-only, excluded from lint).
 
 ## Build, test, lint
@@ -311,7 +326,11 @@ sections your ticket cites before writing code.
 - Run one test: `node --test --import tsx --test-name-pattern "select" test/core/output.test.ts`.
 - `npm run lint` / `npm run lint:fix` — Biome check / auto-fix (format + lint).
 - `npm run typecheck` — type-checks `src/`, `test/` and `scripts/` without emitting.
-- All three of `npm run build && npm test && npm run lint` must be green before a ticket closes.
+- `npm run skill` — rebuilds and regenerates `skills/bs/SKILL.md` from the built binary.
+  `npm run skill:check` re-renders and diffs it; run it after adding or renaming any command,
+  changing a command description, an exit code or a tenant knob, and commit the result.
+- `npm run build && npm test && npm run lint && npm run typecheck && npm run skill:check` must all
+  be green before a ticket closes.
 
 ## Rules
 
@@ -323,8 +342,9 @@ sections your ticket cites before writing code.
 - **Secrets never leak (PRD 8.2).** Cookies, XSRF tokens, JWTs and passwords are never
   printed, logged, serialized into output, or committed. `--verbose` logs lengths and labels
   only. Credentials reach child processes via env, never argv.
-- `--help`, `version` and `schema` must stay side-effect free: no state directory, no
-  `playwright-core` import (import it lazily inside the auth rungs only).
+- `--help`, `version`, `schema` and `skill` must stay side-effect free: no state directory, no
+  network, no `playwright-core` import (import it lazily inside the auth rungs only).
+  `test/auth/no-playwright-load.test.ts` proves it from a child process.
 - Toolchain: Node >= 22.12, TypeScript ESM (`NodeNext`), explicit `.js` extensions in relative
   imports, Biome for format + lint. Dependencies are limited to `commander`, `env-paths`,
   `playwright-core` and the dev tools; pin exact versions.
