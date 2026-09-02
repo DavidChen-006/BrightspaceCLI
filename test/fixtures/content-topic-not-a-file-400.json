@@ -1,0 +1,6 @@
+{
+  "type": "http://docs.valence.desire2learn.com/res/content.html#get--d2l-api-le-(version)-(orgUnitId)-content-topics-(topicId)-file",
+  "title": "Bad Request",
+  "status": 400,
+  "detail": "Content topic is not a file"
+}
