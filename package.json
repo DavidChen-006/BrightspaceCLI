@@ -19,7 +19,9 @@
   "scripts": {
     "build": "tsc -p tsconfig.json && node scripts/buildinfo.mjs",
     "dev": "tsx src/bin/bs.ts",
-    "test": "node --test --import tsx \"test/**/*.test.ts\"",
+    "test": "node --test --import tsx \"test/!(live)/**/*.test.ts\"",
+    "test:live": "BS_LIVE=1 node --test --import tsx \"test/live/**/*.test.ts\"",
+    "e2e": "bash scripts/e2e.sh",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "typecheck": "tsc -p tsconfig.test.json",

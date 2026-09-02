@@ -321,7 +321,8 @@ sections your ticket cites before writing code.
 
 - `npm run build` — `tsc` to `dist/`, then writes `dist/buildinfo.json`.
 - `npm run dev -- <args>` — run from source via `tsx` (e.g. `npm run dev -- schema --json`).
-- `npm test` — `node --test --import tsx "test/**/*.test.ts"` (hermetic: no network, no browser).
+- `npm test` — `node --test --import tsx "test/!(live)/**/*.test.ts"` (hermetic: no network,
+  no browser). The glob deliberately excludes `test/live/`; see "Live E2E" below.
 - Run one file: `node --test --import tsx test/core/output.test.ts`.
 - Run one test: `node --test --import tsx --test-name-pattern "select" test/core/output.test.ts`.
 - `npm run lint` / `npm run lint:fix` — Biome check / auto-fix (format + lint).
@@ -331,6 +332,56 @@ sections your ticket cites before writing code.
   changing a command description, an exit code or a tenant knob, and commit the result.
 - `npm run build && npm test && npm run lint && npm run typecheck && npm run skill:check` must all
   be green before a ticket closes.
+
+## Live E2E (`test/live/`, `scripts/e2e.sh`) — bs-bo2
+
+Everything that touches the real tenant lives behind `BS_LIVE` and is kept out of `npm test`.
+Nothing here holds a credential: both entry points read an existing `BS_ROOT`, and tier 2 (the one
+tier that needs an MFA tap) is documented, never automated.
+
+- `test/live/harness.ts` — the only seam the live suites use, and the only part of them that is
+  hermetically testable: `liveGate()` (skip cleanly when `BS_LIVE` is unset), `requireLiveRoot()` /
+  `requireBuild()` (fail fast with the command that fixes it), `runBs()` (spawns
+  `node dist/bin/bs.js` so the tests exercise the shipped binary, its exit codes and its
+  stdout/stderr split), `parseJsonStdout()` / `itemsOf()` / `describeRun()`, `chooseCourse()` (the
+  first enrollment that is both `isActive` and `canAccess` — 25 of 27 are past-term and 403 on
+  every per-course route) and `isDeepLinkAlive()`.
+- `test/live/tier0.test.ts` — a session is already in place: `auth status`, `whoami`,
+  `courses list`, then the chosen course's `assignments`/`quizzes`/`grades`/`announcements`/
+  `content toc --flat`/`discussions forums`+`topics`/`calendar events`, `upcoming` (its `failures`
+  may only hold past-term 403s), `api GET /d2l/api/lp/<lp>/users/whoami` against `whoami`, the
+  generated deep links fetched with the session cookies and asserted non-404 (bs-fwr), and the
+  output contract (`--wrap-untrusted`, `--plain`, `--select`, `--fail-empty` → exit 3).
+- `test/live/tier1.test.ts` — tier 1 (opt in with `BS_LIVE_TIER=1`): `BS_ROOT` is copied to a
+  temp directory, the copy loses `session.json`, and `bs auth refresh` must re-mint from the
+  surviving `profile/` (headless Chromium). The real root is never mutated. Tier 2 is a skipped
+  test carrying the manual commands.
+- `test/live-harness/*.test.ts` — hermetic, inside `npm test`: the gate, the fail-fast messages,
+  the parsing helpers, the course choice, the redactor, and `scripts/e2e.sh`'s refusals (spawned).
+- `scripts/e2e.sh` — the PRD 12 Definition-of-done run: refuses without `BS_LIVE=1` and `BS_ROOT`
+  (exit 2, before it builds or creates anything), builds, preflights `bs auth doctor --json` (a
+  failing `browser`/`playwright` row is only a warning here) and the anonymous
+  `GET /d2l/api/versions/`, then runs the DoD commands in order, each with its exit code and a
+  one-line summary, and prints one pass/fail table (exit 1 if any required check failed).
+  `--tier 1` adds the refresh tier on a copy of the root; `--keep` leaves the per-check logs under
+  `$BS_ROOT/cache/e2e/<timestamp>/`; `--ou <id>` overrides the course choice.
+- `scripts/lib/redact.mjs` — the fail-closed scrubber every captured stderr passes through before
+  it reaches a log or the terminal (`Authorization`, `cookie`, `x-csrf-token`, `d2lSessionVal*`,
+  `Bearer …`, passwords, and anything JWT-shaped). Plain ESM so bash can run it with bare `node`;
+  `scripts/lib/redact.d.mts` is what lets the hermetic test import it.
+
+How the orchestrator runs them (from a root that already holds a session):
+
+```sh
+npm run build
+BS_LIVE=1 BS_ROOT="$HOME/Library/Application Support/bs" npm run test:live              # tier 0
+BS_LIVE=1 BS_LIVE_TIER=1 BS_ROOT="$HOME/Library/Application Support/bs" npm run test:live  # + tier 1
+BS_LIVE=1 BS_ROOT="$HOME/Library/Application Support/bs" bash scripts/e2e.sh [--tier 1] [--keep]
+```
+
+`npm run test:live` without `BS_ROOT` (or against a root with no `session.json`) fails immediately
+with the command that fixes it; `bash scripts/e2e.sh` without `BS_LIVE=1` exits 2 having done
+nothing. Tier 2 stays manual: `bs auth login` against an empty root, one Authenticator number.
 
 ## Rules
 
