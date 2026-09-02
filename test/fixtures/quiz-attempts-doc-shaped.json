@@ -1,0 +1,33 @@
+{
+  "Objects": [
+    {
+      "AttemptId": 3105001,
+      "QuizId": 790340,
+      "UserId": "123456",
+      "AttemptNumber": 1,
+      "Score": 7.5,
+      "Started": "2026-08-25T14:02:11.000Z",
+      "Completed": "2026-08-25T14:21:40.000Z",
+      "AttemptFeedback": { "Text": "Nice work.", "Html": "<p>Nice work.</p>" },
+      "IsPublished": true,
+      "AttemptDueDate": "2026-09-15T23:59:00Z",
+      "TimeLimitExtension": null,
+      "IsRetakeIncorrectOnly": false
+    },
+    {
+      "AttemptId": 3105002,
+      "QuizId": 790340,
+      "UserId": "123456",
+      "AttemptNumber": 2,
+      "Score": null,
+      "Started": "2026-08-26T09:00:00Z",
+      "Completed": null,
+      "AttemptFeedback": null,
+      "IsPublished": false,
+      "AttemptDueDate": null,
+      "TimeLimitExtension": null,
+      "IsRetakeIncorrectOnly": false
+    }
+  ],
+  "Next": null
+}
