@@ -22,6 +22,15 @@ sections your ticket cites before writing code.
   the payload as decoded, `--select` ignored, `--wrap-untrusted` still applied).
 - `src/cli/commands/whoami.ts`, `src/cli/commands/courses.ts` — `bs whoami`, `bs courses list|get`
   (bs-0am): thin actions that parse flags, call `src/d2l/` through `withData`, shape, emit.
+- `src/cli/commands/announcements.ts` — `bs announcements list|get|download` (bs-ni1). `list <ou>`
+  is one GET on `news/` (bare array, no paging) with `--since` (ISO timestamp, `YYYY-MM-DD`, or a
+  duration `7d|36h|90m|2w` via `parseSince`) and `--limit` (default 20, applied after the
+  newest-first sort); `get <ou> <newsId>` is a filter of that list (D2L has no single-item news
+  route; an unknown or draft id is exit 5); `download <ou> <newsId> [fileId] [--out <dir>]`
+  streams every attachment (or the one `fileId`) through `requestStream` into `--out` (created
+  if missing) via a `.part` temp file + rename, and emits `{fileId, fileName, path, bytes}` rows.
+  `safeFileName()` (basename only, control characters and leading dots stripped, length-capped,
+  fallback `attachment-<fileId>`) and `writeStreamToFile()` live here until a sibling needs them.
 - `src/core/paths.ts` — the single layout decision (PRD 8.1). Resolution is pure;
   `ensureDirs()` creates 0700 dirs and is never called by `--help`, `version`, `schema`.
 - `src/core/config.ts` — tenant knobs (PRD 8.3): flags > `BS_*` env > `config.json` > defaults.
@@ -75,6 +84,13 @@ sections your ticket cites before writing code.
   parsers `courseOf()`/`courseDetailOf()` onto the PRD 6.3 Course shape (every value read, only
   `url` computed, dates through `isoSeconds`). Route helpers take `(http, cfg, ...)` where `cfg`
   is the tenant config (versions from `lpVersion`/`leVersion`, never hard-coded).
+  `announcements.ts`: `newsUrl()`/`attachmentUrl()`, `listNews()` (bare array or a shape error),
+  `streamAttachment()` (non-2xx classified like any route), and the pure parsers
+  `announcementOf()`/`announcements()` onto the PRD 6.3 Announcement shape with the
+  Brightspace-Bar rules: drop only `IsPublished === false`, `date = StartDate ?? CreatedDate`
+  (unreadable falls through), sort newest-first with undated last, attachment `size` from
+  `FileSize` then `Size` (the tenant sends `Size`), `bodyText` from `Body.Text` else
+  `stripHtml(Body.Html)`.
 - `src/schema/schema.ts` — `bs schema --json` from the live commander tree.
 - `src/buildinfo.ts` — version from `package.json`; commit/date from `dist/buildinfo.json`
   (written by `scripts/buildinfo.mjs` during `npm run build`; "unknown" in dev).
