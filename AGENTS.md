@@ -15,6 +15,13 @@ sections your ticket cites before writing code.
 - `src/cli/options.ts` — global flag definitions (PRD 6.1) and the flag type registry.
 - `src/cli/commands/<name>.ts` — one file per resource exporting `register(program, ctx)`;
   add it to the list in `src/cli/commands/index.ts`.
+- `src/cli/data.ts` — what every data command uses: `withData(ctx, (http, cfg) => ...)` (runs
+  `retryOnceOnSessionExpired` and routes against the session's tenant; no session → exit 4 with
+  no data request; never opens a browser), `listEnvelope()`/`emitList()` (PRD 6.3 `{items, count,
+  fetchedAt}` plus `--fail-empty` → exit 3 after the output is written) and `emitRaw()` (`--raw`:
+  the payload as decoded, `--select` ignored, `--wrap-untrusted` still applied).
+- `src/cli/commands/whoami.ts`, `src/cli/commands/courses.ts` — `bs whoami`, `bs courses list|get`
+  (bs-0am): thin actions that parse flags, call `src/d2l/` through `withData`, shape, emit.
 - `src/core/paths.ts` — the single layout decision (PRD 8.1). Resolution is pure;
   `ensureDirs()` creates 0700 dirs and is never called by `--help`, `version`, `schema`.
 - `src/core/config.ts` — tenant knobs (PRD 8.3): flags > `BS_*` env > `config.json` > defaults.
@@ -41,6 +48,16 @@ sections your ticket cites before writing code.
   state, always writes `cache/status.json`), `authorizedHttp(ctx)` (Bearer-attaching client or
   `AuthRequiredError`/`RetryableError`) and `retryOnceOnSessionExpired()` for data commands.
   Browser rungs import `playwright-core` lazily and live in their own files.
+- `src/d2l/` — the typed D2L route layer commands call (one file per resource, evidence in
+  `docs/evidence/d2l-api-web.md`). `common.ts`: `LpTenant`, `d2lId()` (string D2LID → number when
+  numeric), `orgUnitRefOf()`. `links.ts`: every deep-link template from PRD 6.3 (`courseHomeUrl`,
+  `assignmentUrl`, `quizUrl`, `gradebookUrl`, `announcementsUrl`); nothing else derives URLs.
+  `users.ts`: `whoami()`, `userOf()`. `courses.ts`: `enrollmentsUrl()` (query builder:
+  `orgUnitTypeId`/`isActive`/`startDateTime`/`sortBy`), `listEnrollments()` (async iterable over
+  `pagedResultSet`; `--limit` stops fetching), `getEnrollment()`, `getCourse()`, and the pure
+  parsers `courseOf()`/`courseDetailOf()` onto the PRD 6.3 Course shape (every value read, only
+  `url` computed, dates through `isoSeconds`). Route helpers take `(http, cfg, ...)` where `cfg`
+  is the tenant config (versions from `lpVersion`/`leVersion`, never hard-coded).
 - `src/schema/schema.ts` — `bs schema --json` from the live commander tree.
 - `src/buildinfo.ts` — version from `package.json`; commit/date from `dist/buildinfo.json`
   (written by `scripts/buildinfo.mjs` during `npm run build`; "unknown" in dev).
@@ -50,6 +67,10 @@ sections your ticket cites before writing code.
   builds fake sessions/JWTs, loads the auth fixtures and asserts secret-free output.
   `test/fixtures/` holds recorded payloads with a provenance README. `test/live/` (behind
   `BS_LIVE=1`) is the only place that may touch the tenant.
+- `test/commands/<name>.test.ts` — hermetic command suites: seed a session in a temp `--root`
+  (`tempRoot()` + `writeSession(fakeSession({jwt}))`), script HTTP with `fakeTransport`, assert
+  on exit code, stdout, stderr and the recorded requests. `test/d2l/` unit-tests the pure
+  builders and parsers on the recorded fixtures.
 - `reference/` — vendored reference projects (read-only, excluded from lint).
 
 ## Build, test, lint

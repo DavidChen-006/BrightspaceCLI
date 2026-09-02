@@ -217,6 +217,8 @@ const CONTENT_KEYS = new Set([
   'instructions',
   'bodytext',
   'bodyhtml',
+  'descriptionhtml',
+  'html',
   'body',
   'subject',
   'comments',
