@@ -1,0 +1,21 @@
+{
+  "name": "session-capture",
+  "private": true,
+  "type": "module",
+  "description": "Capture a live Brightspace session without handling a password",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/start.mjs",
+    "capture": "node src/manual-capture.mjs",
+    "auto": "node src/auto-capture.mjs",
+    "xsrf": "node src/refresh-xsrf.mjs",
+    "refresh": "node src/refresh.mjs",
+    "test": "node --test \"tests/**/*.test.mjs\"",
+    "postinstall": "playwright install chromium"
+  },
+  "devDependencies": {
+    "playwright": "1.58.2"
+  }
+}

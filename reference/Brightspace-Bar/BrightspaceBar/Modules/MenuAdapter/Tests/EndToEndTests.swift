@@ -1,0 +1,379 @@
+import Foundation
+import Testing
+
+import CourseMenu
+import CoursePipeline
+import MenuAdapter
+
+// ═════════════════════════════════════════════════════════════════════════════
+// MenuAdapter — the wiring shell, and the whole vertical minus the GUI.
+//
+// PRIORITIES (the 1–2 carrying 80% of the value):
+//
+//   1. THE MENU NEVER WAITS ON THE NETWORK. `currentMenu()` must serve what is
+//      already known and touch no socket. Expressed as a CALL COUNT on the source,
+//      never as elapsed time — a timing assertion would be flaky and would not
+//      actually test the property.
+//
+//   2. FAILURE NEVER BLANKS THE MENU. Auth here dies roughly hourly, so a failed
+//      refresh is the normal case, not the exotic one. Experiment 4's cache already
+//      guarantees the DATA survives (`.preservedStale`); what is untested until now
+//      is whether the ADAPTER surfaces it, or hands the GUI an empty model anyway.
+//
+// CULLED: retry/backoff (not in this design), concurrency stress (experiment 4's
+// Poller owns coalescing and tests it), disk format (experiment 4's private
+// business), timing.
+//
+// SCOPE: medium — a real CourseCache writing a real file in a scratch directory,
+// driving a real Poller and the real EnrollmentParser. Only the network is faked.
+// Plus one large, gated on BS_LIVE.
+// ═════════════════════════════════════════════════════════════════════════════
+
+// Mid Fall 2025: the currentness filter makes `now` part of the expected
+// output, so the suite's instant is pinned where RealData's transcribed
+// visible set applies. All clock arithmetic is relative and unaffected.
+private let epoch = RealData.midFall2025
+
+/// `true` only for `BS_LIVE=1 swift test`. Read once at load, as experiment 4 does,
+/// so the gate cannot change mid-suite.
+private let bsLiveEnabled = ProcessInfo.processInfo.environment["BS_LIVE"] != nil
+
+/// The daemon a live run spawns — the same resolution `main.swift` performs, and
+/// the same one both contract suites use.
+private let liveDaemonCLI = ProcessInfo.processInfo.environment["BSB_REFRESH_CLI"]
+    ?? NSHomeDirectory() + "/PaperShelf/session-capture/src/refresh.mjs"
+
+/// Assembles the real experiment-4 stack around a scripted source.
+///
+/// `staleAfter` and `interval` are set long so nothing goes stale mid-test by
+/// accident: every fetch in this suite happens because a test asked for one.
+private func makeAdapter(
+    source: CountingSource,
+    file: URL,
+    clock: ManualClock,
+    interval: TimeInterval = 3600
+) -> (adapter: MenuAdapter, cache: CourseCache) {
+    let cache = CourseCache(fileURL: file, clock: clock, staleAfter: interval)
+    let poller = Poller(
+        source: source,
+        cache: cache,
+        policy: PollPolicy(interval: interval),
+        clock: clock
+    )
+    let adapter = MenuAdapter(
+        poller: poller, cache: cache, baseURL: RealData.baseURL, clock: clock
+    )
+    return (adapter, cache)
+}
+
+/// Real courses only — with two or more rendered courses the menu leads with
+/// the "All classes" fold (id == -1, aggregate row, Intent 3), a derived view
+/// this suite's enrollment claims must look past.
+private extension MenuModel {
+    var realCourses: [CourseRow] { self.courses.filter { $0.id != -1 } }
+}
+
+@Suite("MenuAdapter — the frontend/backend join")
+struct EndToEndTests {
+
+    // ── The headline: the whole vertical minus the GUI ────────────────────────
+
+    @Test("real bytes flow through parser, cache and translation into a menu")
+    func theFullChainYieldsTwentySevenClickableRows() async throws {
+        // Arrange — the genuine 14,938-byte payload, the real parser, a real cache
+        // on a real file. Nothing about this data is hand-built.
+        let scratch = try ScratchDir()
+        let clock = ManualClock(epoch)
+        let source = CountingSource([.bytes(try CrossPackageFixture.enrollmentBytes)])
+        let (adapter, _) = makeAdapter(source: source, file: scratch.file(), clock: clock)
+
+        // Act
+        let model = await adapter.refresh()
+
+        // Assert — count, then that the rows are genuinely populated: "27" must not
+        // be achievable with twenty-seven blank placeholders.
+        try #require(model.realCourses.count == RealData.visibleIDsAtMidFall2025.count)
+        for row in model.realCourses {
+            #expect(row.id > 0)
+            #expect(!row.title.isEmpty)
+            #expect(row.url.absoluteString == "https://purdue.brightspace.com/d2l/home/\(row.id)")
+        }
+
+        // And a named spot check, so a systematic id shift cannot pass.
+        let dataStructures = try #require(model.courses.first { $0.id == RealData.dataStructuresID })
+        #expect(dataStructures.title == RealData.dataStructuresName)
+        #expect(dataStructures.subtitle == RealData.dataStructuresShortCode)
+    }
+
+    // ── Priority 1: the menu never waits on the network ──────────────────────
+
+    @Test("currentMenu does not fetch")
+    func currentMenuTouchesNoSocket() async throws {
+        // Arrange
+        let scratch = try ScratchDir()
+        let clock = ManualClock(epoch)
+        let source = CountingSource([.bytes(try CrossPackageFixture.enrollmentBytes)])
+        let (adapter, _) = makeAdapter(source: source, file: scratch.file(), clock: clock)
+
+        // Act — several opens, as a user clicking the icon repeatedly.
+        _ = await adapter.currentMenu()
+        _ = await adapter.currentMenu()
+        _ = await adapter.currentMenu()
+
+        // Assert
+        #expect(await source.callCount() == 0)
+    }
+
+    /// The control for the test above. Without it, an adapter whose `refresh()` is
+    /// also a no-op would satisfy "currentMenu does not fetch" perfectly — the
+    /// classic vacuous pass. This is what makes the pair meaningful.
+    @Test("refresh does fetch — the control for currentMenu not fetching")
+    func refreshTouchesTheSocketExactlyOnce() async throws {
+        // Arrange
+        let scratch = try ScratchDir()
+        let clock = ManualClock(epoch)
+        let source = CountingSource([.bytes(try CrossPackageFixture.enrollmentBytes)])
+        let (adapter, _) = makeAdapter(source: source, file: scratch.file(), clock: clock)
+
+        // Act
+        _ = await adapter.refresh()
+
+        // Assert
+        #expect(await source.callCount() == 1)
+    }
+
+    @Test("an explicit refresh fetches again even inside the poll interval")
+    func refreshIsAlwaysHonoured() async throws {
+        // Arrange — interval far longer than the gap between the two calls, so a
+        // staleness-gated refresh would decline the second one.
+        let scratch = try ScratchDir()
+        let clock = ManualClock(epoch)
+        let source = CountingSource([.bytes(try CrossPackageFixture.enrollmentBytes)])
+        let (adapter, _) = makeAdapter(
+            source: source, file: scratch.file(), clock: clock, interval: 86_400
+        )
+
+        // Act — a user clicking Refresh twice must be obeyed twice; being told
+        // "still fresh" when you explicitly asked is a bug, not an optimisation.
+        _ = await adapter.refresh()
+        _ = await adapter.refresh()
+
+        // Assert
+        #expect(await source.callCount() == 2)
+    }
+
+    @Test("currentMenu after a refresh serves the fetched data without refetching")
+    func currentMenuServesWhatRefreshFetched() async throws {
+        // Arrange
+        let scratch = try ScratchDir()
+        let clock = ManualClock(epoch)
+        let source = CountingSource([.bytes(try CrossPackageFixture.enrollmentBytes)])
+        let (adapter, _) = makeAdapter(source: source, file: scratch.file(), clock: clock)
+        _ = await adapter.refresh()
+
+        // Act
+        let model = await adapter.currentMenu()
+
+        // Assert
+        #expect(model.realCourses.count == RealData.visibleIDsAtMidFall2025.count)
+        #expect(await source.callCount() == 1, "currentMenu triggered a second fetch")
+    }
+
+    // ── Priority 2: failure never blanks the menu ───────────────────────────
+
+    @Test("a failing refresh keeps the courses that were already there")
+    func failurePreservesTheVisibleCourses() async throws {
+        // Arrange — one good fetch, then the session dies. This is the ordinary
+        // hourly case for this app, not an exotic one.
+        let scratch = try ScratchDir()
+        let clock = ManualClock(epoch)
+        let source = CountingSource(
+            [.bytes(try CrossPackageFixture.enrollmentBytes), .failure(.sessionExpired)],
+            repeatLast: true
+        )
+        let (adapter, _) = makeAdapter(source: source, file: scratch.file(), clock: clock)
+
+        let before = await adapter.refresh()
+        try #require(before.realCourses.count == RealData.visibleIDsAtMidFall2025.count)
+
+        // Act
+        let after = await adapter.refresh()
+
+        // Assert — the whole point: a dead session must not empty the dropdown.
+        #expect(after.realCourses.count == RealData.visibleIDsAtMidFall2025.count)
+        #expect(after.courses.map(\.id) == before.courses.map(\.id))
+    }
+
+    @Test(
+        "every failure kind preserves the courses, not just session expiry",
+        arguments: [
+            CourseSourceError.sessionExpired,
+            CourseSourceError.transport("offline"),
+            CourseSourceError.httpStatus(500),
+            CourseSourceError.malformedBody("garbage"),
+        ]
+    )
+    func allFailureKindsPreserveCourses(error: CourseSourceError) async throws {
+        // Arrange
+        let scratch = try ScratchDir()
+        let clock = ManualClock(epoch)
+        let source = CountingSource(
+            [.bytes(try CrossPackageFixture.enrollmentBytes), .failure(error)], repeatLast: true
+        )
+        let (adapter, _) = makeAdapter(source: source, file: scratch.file(), clock: clock)
+        _ = await adapter.refresh()
+
+        // Act
+        let after = await adapter.refresh()
+
+        // Assert
+        #expect(after.realCourses.count == RealData.visibleIDsAtMidFall2025.count)
+    }
+
+    @Test("currentMenu still serves the courses after a failed refresh")
+    func openingTheMenuOfflineStillShowsCourses() async throws {
+        // Arrange — the offline sentence of the success story: David clicks the
+        // icon with no internet and his classes are still listed.
+        let scratch = try ScratchDir()
+        let clock = ManualClock(epoch)
+        let source = CountingSource(
+            [.bytes(try CrossPackageFixture.enrollmentBytes), .failure(.transport("offline"))],
+            repeatLast: true
+        )
+        let (adapter, _) = makeAdapter(source: source, file: scratch.file(), clock: clock)
+        _ = await adapter.refresh()
+        _ = await adapter.refresh()
+
+        // Act
+        let model = await adapter.currentMenu()
+
+        // Assert
+        #expect(model.realCourses.count == RealData.visibleIDsAtMidFall2025.count)
+        #expect(!model.rows.isEmpty)
+    }
+
+    @Test("a failure on a cold cache yields a menu with rows, never a blank one")
+    func coldFailureStillShowsSomething() async throws {
+        // Arrange — worst case: first ever launch AND the session is already dead.
+        let scratch = try ScratchDir()
+        let clock = ManualClock(epoch)
+        let source = CountingSource([.failure(.sessionExpired)])
+        let (adapter, _) = makeAdapter(source: source, file: scratch.file(), clock: clock)
+
+        // Act
+        let model = await adapter.refresh()
+
+        // Assert — no courses to show is fine; showing nothing at all is not.
+        #expect(model.courses.isEmpty)
+        #expect(!model.rows.isEmpty, "a blank dropdown reads as a crashed app")
+    }
+
+    // ── Cold and warm start ─────────────────────────────────────────────────
+
+    @Test("a cold adapter with no cache file yields the placeholder")
+    func coldStartIsThePlaceholder() async throws {
+        // Arrange — nothing on disk, nothing fetched.
+        let scratch = try ScratchDir()
+        let clock = ManualClock(epoch)
+        let source = CountingSource([.courses([])])
+        let (adapter, _) = makeAdapter(source: source, file: scratch.file(), clock: clock)
+
+        // Act
+        let model = await adapter.currentMenu()
+
+        // Assert
+        #expect(model == MenuModel.placeholder)
+        #expect(await source.callCount() == 0)
+    }
+
+    @Test("a relaunch serves the previous courses off disk before any fetch")
+    func warmStartLoadsFromDisk() async throws {
+        // Arrange — first run fetches and persists; then a brand-new adapter and a
+        // brand-new source stand in for a relaunched process.
+        let scratch = try ScratchDir()
+        let file = scratch.file()
+        let clock = ManualClock(epoch)
+
+        let firstRun = CountingSource([.bytes(try CrossPackageFixture.enrollmentBytes)])
+        let (first, _) = makeAdapter(source: firstRun, file: file, clock: clock)
+        _ = await first.refresh()
+
+        let secondRun = CountingSource([.failure(.transport("should not be called"))])
+        let (second, _) = makeAdapter(source: secondRun, file: file, clock: clock)
+
+        // Act — the menu-open of a freshly launched app.
+        let model = await second.currentMenu()
+
+        // Assert — the courses came off disk, and no fetch was needed to get them.
+        #expect(model.realCourses.count == RealData.visibleIDsAtMidFall2025.count)
+        #expect(await secondRun.callCount() == 0)
+    }
+
+
+    // ── SystemClock: the one place Date() is allowed ─────────────────────────
+
+    @Test("SystemClock reports approximately the real time")
+    func systemClockIsWiredToRealTime() {
+        // Arrange / Act — nothing else in either package may call `Date()`, so if
+        // this returns a constant or a distant date there is nowhere else to notice.
+        let observed = SystemClock().now
+
+        // Assert — generous window; the claim is "wired up", not "precise".
+        #expect(abs(observed.timeIntervalSinceNow) < SystemClockProbe.tolerance)
+    }
+
+    // ── The live run: proof the fake did not drift ───────────────────────────
+
+    /// Skipped by default so `swift test` stays hermetic — no network, no cookie,
+    /// no daemon. Mirrors experiment 4's gating exactly.
+    ///
+    /// Rewritten in phase 5 onto `DaemonCourseSource`, the source the app actually
+    /// ships: the app no longer holds a cookie or mints a JWT, so a live menu is
+    /// only live if the daemon produced it. The arrangement mirrors
+    /// `CourseSourceContractTests`' `.live` case exactly.
+    ///
+    /// What this claims that the contract suite does not: the contract asks whether
+    /// the SOURCE answers, this asks whether the resulting courses still reach the
+    /// MENU. Between them sits `MenuTranslation.visibleCourses`, and the daemon
+    /// maps every course's `startDate`/`endDate` across a language boundary with no
+    /// compiler checking it — mis-map them and every course reads as not-current, so
+    /// the contract stays green while David's menu goes empty.
+    @Test("the real tenant produces a clickable menu", .enabled(if: bsLiveEnabled))
+    func liveTenantYieldsAClickableMenu() async throws {
+        // Arrange — the real daemon, run cron-safe: no `--allow-full-login`, so
+        // this can never open a browser window mid-suite (D8). Credentials stay on
+        // the daemon's side of the boundary entirely; nothing here reads a session.
+        let scratch = try ScratchDir()
+        let clock = ManualClock(Date())
+        let cache = CourseCache(fileURL: scratch.file(), clock: clock, staleAfter: 3600)
+        let poller = Poller(
+            source: DaemonCourseSource(runner: DaemonRunner(
+                executable: URL(fileURLWithPath: "/usr/bin/env"),
+                arguments: ["node", liveDaemonCLI],
+                paths: DaemonPaths.resolve(),
+                timeout: 180
+            )),
+            cache: cache,
+            policy: PollPolicy(interval: 3600),
+            clock: clock
+        )
+        let adapter = MenuAdapter(
+            poller: poller, cache: cache, baseURL: RealData.baseURL, clock: clock
+        )
+
+        // Act
+        let model = await adapter.refresh()
+
+        // Assert — the anti-drift claim: if the live tenant yields an empty menu
+        // while the fixture yields 27, that surfaces here and not as a blank
+        // dropdown in front of the user.
+        try #require(!model.courses.isEmpty, "the live tenant produced no courses")
+        for row in model.courses {
+            #expect(row.id > 0)
+            #expect(!row.title.isEmpty)
+            #expect(row.url.absoluteString == "https://purdue.brightspace.com/d2l/home/\(row.id)")
+        }
+        #expect(Set(model.courses.map(\.id)).count == model.courses.count, "duplicate ids")
+        #expect(model.rows.contains { if case .command(.refresh) = $0 { true } else { false } })
+    }
+}
