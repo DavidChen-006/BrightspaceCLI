@@ -74,7 +74,10 @@ sections your ticket cites before writing code.
 - `src/core/config.ts` — tenant knobs (PRD 8.3): flags > `BS_*` env > `config.json` > defaults.
 - `src/core/errors.ts` — `BsError` classes, `EXIT_CODES`, `exitCodeFor()`, `formatError()`.
 - `src/core/output.ts` — JSON/TSV writers, `--select`, `--results-only`, untrusted wrapping,
-  `Table`, color.
+  `Table`, color. `--wrap-untrusted` wraps the PRD 10.3 keys, every key ending in `Html`/`Text`
+  (`instructionsHtml`, `feedbackHtml`, `bodyText`, ...) and, on rows whose `kind` is `content`,
+  `path` (module titles); `METADATA_KEYS`/suffixes (`id`, `url`, `fileName`, `mimeType`, dates)
+  always win, so a download summary's filesystem `path` is never wrapped.
 - `src/core/http/` — the one HTTP seam (PRD 9), imported via `index.js`: `client.ts`
   (`createHttp()` with injectable transport/clock/sleep/random/log, read-only guard, retries,
   first-byte timeout, `withBearer`), `classify.ts` (`classify()`, `problemDetails()`, `readJson()`,
@@ -143,7 +146,8 @@ sections your ticket cites before writing code.
   `content.ts`: `contentTocUrl()`/`contentTopicUrl()`/`contentTopicFileUrl()`/`contentModuleStructureUrl()`,
   `getToc()`, `getTopic()` (400 → UsageError), `getModuleStructure()`, `streamTopicFile()` (a
   `StreamOutcome` for the command to classify), and the pure parsers `tocTree()`/`flattenToc()` (PRD 6.3
-  Topic shape with `kind: 'content'`, `path`, `depth`; the server `Url` absolutised, never templated;
+  Topic shape with `kind: 'content'`, `path` (module titles joined with " / ", wrapped under
+  `--wrap-untrusted` because the row kind is `content`), `depth`; the server `Url` absolutised, never templated;
   CONTENTACTIVITYTYPE_T / CONTENT_TOPIC_T mapped to names with the numeric id kept),
   `topicDetailOf()`, `moduleChildOf()`/`moduleChildren()`, plus the download-name helpers
   `filenameFromContentDisposition()` (RFC 6266/5987), `safeFileName()` and `fileNameFromTopicUrl()`.

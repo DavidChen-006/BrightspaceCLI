@@ -248,7 +248,7 @@ test('content toc --limit caps topic rows (--flat) or top-level modules (tree)',
   }
 });
 
-test('content toc --wrap-untrusted wraps titles (and sanitises look-alikes) but never path, url, type', async () => {
+test('content toc --wrap-untrusted wraps titles and the module path (and sanitises look-alikes) but never url, type', async () => {
   const { root } = seeded();
   try {
     const flat = await content(
@@ -263,7 +263,11 @@ test('content toc --wrap-untrusted wraps titles (and sanitises look-alikes) but 
     assert.ok(recording?.title.includes('[[MARKER_SANITIZED]]'), recording?.title);
     assert.equal(recording?.url, 'https://mediaspace.example.edu/media/lecture01');
     assert.equal(recording?.activityType, 'Link');
-    assert.equal(recording?.path, 'Week 1: Foundations / Lectures');
+    assert.ok(
+      recording?.path.startsWith(MARKER_START),
+      'path is instructor-authored module titles',
+    );
+    assert.ok(recording?.path.includes('Week 1: Foundations / Lectures'), recording?.path);
     assert.deepEqual(out.externalContent, {
       untrusted: true,
       source: 'brightspace',
