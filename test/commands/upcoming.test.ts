@@ -533,7 +533,12 @@ test('upcoming: --plain columns, human table, --select, --results-only, --wrap-u
     const marker = new RegExp(
       `^${MARKER_START} id="([0-9a-f]{16})">>>\\nSource: brightspace\\n---\\n[\\s\\S]*\\n${MARKER_END} id="\\1">>>$`,
     );
-    for (const item of out.items) assert.match(item.title, marker);
+    for (const item of out.items) {
+      assert.match(item.title, marker);
+      // courseName is tenant-authored text like Course.name (bs-ec4), so it wraps too.
+      assert.match(String(item.courseName), marker);
+      assert.ok(String(item.courseName).includes(CIVICS), 'the course name survives inside');
+    }
     const first = out.items[0] as Item;
     assert.equal(first.id, 700001);
     assert.equal(first.kind, 'assignment');

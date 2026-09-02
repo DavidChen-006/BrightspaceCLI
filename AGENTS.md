@@ -143,10 +143,11 @@ sections your ticket cites before writing code.
 - `src/core/config.ts` — tenant knobs (PRD 8.3): flags > `BS_*` env > `config.json` > defaults.
 - `src/core/errors.ts` — `BsError` classes, `EXIT_CODES`, `exitCodeFor()`, `formatError()`.
 - `src/core/output.ts` — JSON/TSV writers, `--select`, `--results-only`, untrusted wrapping,
-  `Table`, color. `--wrap-untrusted` wraps the PRD 10.3 keys, every key ending in `Html`/`Text`
-  (`instructionsHtml`, `feedbackHtml`, `bodyText`, ...) and, on rows whose `kind` is `content`,
-  `path` (module titles); `METADATA_KEYS`/suffixes (`id`, `url`, `fileName`, `mimeType`, dates)
-  always win, so a download summary's filesystem `path` is never wrapped.
+  `Table`, color. `--wrap-untrusted` wraps the PRD 10.3 keys, `courseName`, every key ending in
+  `Html`/`Text`/`Name` (`instructionsHtml`, `feedbackHtml`, `bodyText`, `shortName`, a raw
+  payload's `OrgUnitName`, ...) and, on rows whose `kind` is `content`, `path` (module titles);
+  `METADATA_KEYS`/suffixes (`id`, `url`, `fileName`, `uniqueName`, `mimeType`, dates) always win,
+  so a download summary's filesystem `path` is never wrapped.
 - `src/core/http/` — the one HTTP seam (PRD 9), imported via `index.js`: `client.ts`
   (`createHttp()` with injectable transport/clock/sleep/random/log, read-only guard, retries,
   first-byte timeout, `withBearer`), `classify.ts` (`classify()`, `problemDetails()`, `readJson()`,

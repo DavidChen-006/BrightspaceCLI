@@ -247,6 +247,8 @@ const CONTENT_KEYS = new Set([
   'lastname',
   'pronouns',
   'shortname',
+  // `bs upcoming` carries the offering's name beside each item (bs-ec4): tenant text like Course.name.
+  'coursename',
 ]);
 
 /** Any string under these array keys is content (spreadsheet-like payloads from `bs api`). */
@@ -293,11 +295,13 @@ const METADATA_KEYS = new Set([
 const METADATA_SUFFIXES = ['id', 'ids', 'url', 'link', 'date', 'time', 'at'];
 
 /**
- * Any key spelled `<something>Html` or `<something>Text` is a rendering of tenant free text
- * (`instructionsHtml`, `feedbackHtml`, `bodyText`, ...), so it is content unless it is an
- * explicit metadata key. Deny still wins: `mimeType` is not text.
+ * Any key spelled `<something>Html`, `<something>Text` or `<something>Name` is a rendering of
+ * tenant free text (`instructionsHtml`, `feedbackHtml`, `bodyText`, `courseName`, a raw
+ * payload's `OrgUnitName` / `GradeObjectName`, ...), so it is content unless it is an explicit
+ * metadata key. Deny still wins: `mimeType` is not text, `fileName` and `uniqueName` are
+ * identifiers.
  */
-const CONTENT_SUFFIXES = ['html', 'text'];
+const CONTENT_SUFFIXES = ['html', 'text', 'name'];
 
 /**
  * Keys that are content only on rows of a given `kind`. A content Topic's `path` is the
