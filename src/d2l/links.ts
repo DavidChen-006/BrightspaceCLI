@@ -22,3 +22,21 @@ export function gradebookUrl(base: string, ou: number): string {
 export function announcementsUrl(base: string, ou: number): string {
   return `${base}/d2l/lms/news/main.d2l?ou=${ou}`;
 }
+
+/** D2L discussion tool routes (standard `/d2l/le/{ou}/discussions/...` paths; not yet probed live). */
+export function discussionsUrl(base: string, ou: number): string {
+  return `${base}/d2l/le/${ou}/discussions/List`;
+}
+
+export function discussionTopicUrl(base: string, ou: number, topicId: number): string {
+  return `${base}/d2l/le/${ou}/discussions/topics/${topicId}/View`;
+}
+
+export function discussionThreadUrl(base: string, ou: number, threadId: number): string {
+  return `${base}/d2l/le/${ou}/discussions/threads/${threadId}/View`;
+}
+
+/** The course calendar; an event's own `CalendarEventViewUrl` is preferred when D2L sends one. */
+export function calendarUrl(base: string, ou: number): string {
+  return `${base}/d2l/le/calendar/${ou}`;
+}

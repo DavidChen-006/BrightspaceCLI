@@ -69,6 +69,22 @@ sections your ticket cites before writing code.
   if missing) via a `.part` temp file + rename, and emits `{fileId, fileName, path, bytes}` rows.
   `safeFileName()` (basename only, control characters and leading dots stripped, length-capped,
   fallback `attachment-<fileId>`) and `writeStreamToFile()` live here until a sibling needs them.
+- `src/cli/commands/calendar.ts` — `bs calendar events [ou...] [--from] [--to] [--type] [--limit]`
+  (bs-bbc): one `calendar/events/myEvents/` ObjectListPage walk per chunk of <=100 org units
+  (`orgUnitIdsCSV`, dates via `toD2lDateTime`, window default now → +30 days, `--type due` =
+  `eventType=6`). Without org units it resolves active course offerings through `listEnrollments`
+  (the `bs courses list` defaults) first; no active course → empty list plus a warning, no calendar
+  request. Chunks fan out through `boundedPool(cfg.concurrency)` with per-chunk isolation (one chunk
+  failing warns; all failing reports the first error). The tenant answers an empty page (instructors
+  never opt in): exit 0, or 3 under `--fail-empty`. Bad ids/dates/windows/types → exit 2 before any
+  request (`parseDate` accepts `YYYY-MM-DD` or an ISO timestamp and rejects calendar-invalid days).
+- `src/cli/commands/discussions.ts` — `bs discussions forums <ou>`, `topics <ou> [forumId]`,
+  `posts <ou> <forumId> <topicId> [--threads-only] [--limit] [--page-size]` (bs-bbc). `topics`
+  without a forum lists `forums/` then every forum's `topics/` through `boundedPool(cfg.concurrency)`
+  with per-forum isolation (a failing forum warns and costs only its topics; every forum failing
+  reports the first error). `posts` pages with `pageNumbered` (`pageSize` default 100, max 1000;
+  stop on a short page; `--limit` stops fetching). 404s carry the parent-listing hint
+  (`bs discussions forums <ou>` / `bs discussions topics <ou> <forumId>`).
 - `src/core/paths.ts` — the single layout decision (PRD 8.1). Resolution is pure;
   `ensureDirs()` creates 0700 dirs and is never called by `--help`, `version`, `schema`.
 - `src/core/config.ts` — tenant knobs (PRD 8.3): flags > `BS_*` env > `config.json` > defaults.
@@ -173,6 +189,18 @@ sections your ticket cites before writing code.
   (unreadable falls through), sort newest-first with undated last, attachment `size` from
   `FileSize` then `Size` (the tenant sends `Size`), `bodyText` from `Body.Text` else
   `stripHtml(Body.Html)`.
+  `discussions.ts`: `forumsUrl()`/`topicsUrl()`/`postsUrl()` (`sort=-creationdate`, optional
+  `threadsOnly`), `listForums()`/`listTopics()` (bare arrays; anything else is "expected a bare
+  array"), `listPosts()` (page-numbered async iterable) and the pure parsers `forumOf()`/`topicOf()`
+  (PRD 6.3 Discussion topic; `forumId` from the payload, falling back to the listed forum)/`postOf()`
+  (PRD 6.3 post: `author` = `PostingUserDisplayName`, `authorId` via `d2lId`, `replies` =
+  `ReplyPostIds`, `attachments[{fileId,fileName,size}]`, `url` = thread view, else topic view).
+  `calendar.ts`: `EVENT_TYPES` (EVENTTYPE_T names → numbers), `myEventsUrl()`/`listMyEvents()`
+  (ObjectListPage over `orgUnitIdsCSV`/`startDateTime`/`endDateTime`/`eventType`, ≤100 org units
+  per request) and `eventOf()` onto the PRD 6.3 Event shape (`type` the EVENTTYPE_T name, `url` =
+  `CalendarEventViewUrl` else `calendarUrl(ou)`). `links.ts` also holds `discussionsUrl`,
+  `discussionTopicUrl`, `discussionThreadUrl` and `calendarUrl` (standard D2L paths, not yet
+  probed live).
 - `src/schema/schema.ts` — `bs schema --json` from the live commander tree.
 - `src/buildinfo.ts` — version from `package.json`; commit/date from `dist/buildinfo.json`
   (written by `scripts/buildinfo.mjs` during `npm run build`; "unknown" in dev).

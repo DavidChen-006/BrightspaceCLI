@@ -1,0 +1,32 @@
+[
+  {
+    "ForumId": 12002,
+    "TopicId": 31004,
+    "Name": "Ask anything",
+    "Description": { "Text": "Questions about logistics.", "Html": "<p>Questions about logistics.</p>" },
+    "StartDate": null,
+    "EndDate": null,
+    "UnlockStartDate": null,
+    "UnlockEndDate": null,
+    "IsLocked": false,
+    "AllowAnonymousPosts": true,
+    "RequiresApproval": false,
+    "UnApprovedPostCount": 0,
+    "PinnedPostCount": 0,
+    "ScoringType": "Unscored",
+    "IsAutoScore": false,
+    "ScoreOutOf": null,
+    "IncludeNonScoredValues": false,
+    "ScoredCount": 0,
+    "RatingsSum": 0,
+    "RatingsCount": 0,
+    "IsHidden": false,
+    "MustPostToParticipate": false,
+    "RatingType": 0,
+    "ActivityId": null,
+    "GroupTypeId": null,
+    "StartDateAvailabilityType": null,
+    "EndDateAvailabilityType": null,
+    "DueDate": null
+  }
+]
