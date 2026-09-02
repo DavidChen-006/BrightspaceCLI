@@ -85,6 +85,36 @@ sections your ticket cites before writing code.
   reports the first error). `posts` pages with `pageNumbered` (`pageSize` default 100, max 1000;
   stop on a short page; `--limit` stops fetching). 404s carry the parent-listing hint
   (`bs discussions forums <ou>` / `bs discussions topics <ou> <forumId>`).
+- `src/cli/commands/upcoming.ts` — `bs upcoming [--days 14] [--kinds a,b] [--course <ou>]... [--limit n]`
+  (bs-cv2), the one workflow command (PRD 6.2 upcoming row, 9 fan-out). Active courses come from
+  `listEnrollments` (the `bs courses list` defaults; ids are deduped) or the repeatable `--course`
+  (no enrollment request, so `courseName` is null). Pool units go through
+  `boundedPool(cfg.concurrency)`: one unit per course (`dropbox/folders/`, `quizzes/` and
+  `discussions/forums/` + every forum's `topics/`, run in sequence so `BS_CONCURRENCY` bounds the
+  requests in flight) plus one `content/myItems/due/?orgUnitIdsCSV=` unit per chunk of <=100
+  courses; `--kinds` drops the routes of the kinds not asked for. Every route is isolated: a failure
+  costs only its items and lands in the envelope's `failures[{courseId, courseName, status,
+  message}]` (`courseId` null for a content chunk). The first 403 marks a course past-term and
+  skips its remaining routes; past-term courses are ONE stderr line (`N courses returned 403
+  (past-term); details with --verbose`, per-course lines under `--verbose`), other failures warn
+  one line each. The command only fails when no route at all answered and no course was past-term
+  (then the first error is rethrown), on auth (a 401 re-mints once through `withData`) or
+  cancellation; every course 403 is exit 0 with an empty list (3 under `--fail-empty`).
+  `mergeUpcoming` keeps items due in `[now, now + days]`, dedupes by `(kind, id)`, sorts by
+  `dueDate` then `title`; `--limit` slices after the sort (every course is still fetched). `--plain`
+  columns: `kind courseId courseName id title dueDate url`.
+- `src/cli/commands/api.ts` — `bs api <METHOD> <path> [--query k=v]... [--raw]` (bs-cv2): one
+  authenticated request against any `/d2l/` route, the payload emitted losslessly (PRD 6.2 api row,
+  gogcli §7/§14). `<method>` is GET/HEAD/OPTIONS (`Argument.choices` for the schema enum plus a
+  case-folding parser; anything else is exit 2 before any request, the HTTP layer's guard being
+  the second line of defence). `<path>` must start with `/d2l/` and is normalised against the
+  tenant (`..` cannot escape it, no host); a `?query` in it is kept and `--query` pairs (split at
+  the first `=`) are appended through `d2lUrl`. There is deliberately no `--header` (so
+  `X-HTTP-Method-Override` cannot be sent) and no `--body`. Non-2xx → `classify`/`toError` (404 →
+  5, 403 → 6, 401 → one re-mint then 4). A JSON body is emitted parsed (`--select`,
+  `--wrap-untrusted`, `--plain` all apply); a non-JSON body is printed as text (a JSON string under
+  `--json` so stdout stays JSON); `--raw` prints the body exactly as received in every mode (still
+  wrapped under `--wrap-untrusted`); HEAD prints the response headers (lower-cased) as an object.
 - `src/core/paths.ts` — the single layout decision (PRD 8.1). Resolution is pure;
   `ensureDirs()` creates 0700 dirs and is never called by `--help`, `version`, `schema`.
 - `src/core/config.ts` — tenant knobs (PRD 8.3): flags > `BS_*` env > `config.json` > defaults.
@@ -201,6 +231,13 @@ sections your ticket cites before writing code.
   `CalendarEventViewUrl` else `calendarUrl(ou)`). `links.ts` also holds `discussionsUrl`,
   `discussionTopicUrl`, `discussionThreadUrl` and `calendarUrl` (standard D2L paths, not yet
   probed live).
+  `upcoming.ts`: `chunkOrgUnits()` (<=100 ids), `myItemsDueUrl()`/`listMyItemsDue()` (ObjectListPage
+  over `content/myItems/due/?orgUnitIdsCSV=`, one walk per chunk; d2l-api-web Extra E),
+  `scheduledItemOf()` (ScheduledItem → Item with `kind: 'content'`; string `OrgUnitId` via `d2lId`,
+  `ItemUrl` absolutised through `content.ts` `absoluteUrl`, never templated), the
+  `candidateOf*()` adapters from the Assignment/Quiz/DiscussionTopic shapes, and the pure
+  `mergeUpcoming(sources, {now, days}, courseNames)` (window inclusive at both ends, dedupe by
+  `(kind, id)` first wins, sort by `dueDate`, `title`, `kind`, `id`; failures copied through).
 - `src/schema/schema.ts` — `bs schema --json` from the live commander tree.
 - `src/buildinfo.ts` — version from `package.json`; commit/date from `dist/buildinfo.json`
   (written by `scripts/buildinfo.mjs` during `npm run build`; "unknown" in dev).
