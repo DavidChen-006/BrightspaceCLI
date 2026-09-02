@@ -242,37 +242,37 @@ logs, or JSON output; logs report lengths only. `--verbose` still redacts.
 
 | ID | Assumption | Evidence (filled during reference sweep) |
 | --- | --- | --- |
-| A-01 | Node 20 floor suffices | |
-| A-02 | Playwright `launchPersistentContext` is the profile primitive | |
+| A-01 | Node 20 floor suffices | RESOLVED (Brightspace-Bar): `engines.node >=20`, `.nvmrc` 20, CI matrix Node 20 + 22 (`session-capture/package.json`, `.github/workflows/ci.yml:26-27`). Web wave confirms Node 20 API set. |
+| A-02 | Playwright `launchPersistentContext` is the profile primitive | RESOLVED (Brightspace-Bar): `chromium.launchPersistentContext(profileDir, {headless})` in `rungs/browser.mjs:152-163`; lazy `import("playwright")`; playwright 1.58.2 pinned. `docs/evidence/brightspace-bar-sweep.md` A-02. |
 | A-03 | commander introspection suffices for `schema --json` | |
 | A-04 | plain `tsc` build is enough for the bin | |
 | A-05 | biome for lint/format | |
 | A-06 | postinstall `playwright install chromium` acceptable | |
-| A-07 | 30 s default request timeout | |
+| A-07 | 30 s default request timeout | RESOLVED (gogcli): 30 s is a *response-header* timeout (`internal/googleapi/client.go:20-30, 251-256`); `http.Client.Timeout` deliberately unset so downloads are not truncated. `bs` applies `--timeout` to headers/first byte, not the whole body. See `docs/evidence/gogcli-sweep.md` §10. |
 | A-08 | `users/whoami` endpoint and shape | |
-| A-09 | enrollments pagination via `bookmark` + `PagingInfo.HasMoreItems` | |
+| A-09 | enrollments pagination via `bookmark` + `PagingInfo.HasMoreItems` | PARTIAL (Brightspace-Bar): envelope `{PagingInfo{Bookmark:string,HasMoreItems}, Items}` recorded live; page size 100 measured on the unfiltered call; continuation param NOT recorded → web wave. |
 | A-10 | `lp/{v}/courses/{ou}` endpoint | |
-| A-11 | `dropbox/folders/{id}` single-folder endpoint | |
+| A-11 | `dropbox/folders/{id}` single-folder endpoint | PARTIAL (Brightspace-Bar): list route + full 28-key folder shape recorded (`CustomInstructions{Text,Html}`, `Availability` null, `ActivityId` string URI); single-folder route not called locally → web wave. |
 | A-12 | `dropbox/folders/{id}/submissions/mine/` | |
-| A-13 | `quizzes/{id}` single-quiz endpoint | |
-| A-14 | `grades/values/myGradeValues/` shape | |
+| A-13 | `quizzes/{id}` single-quiz endpoint | PARTIAL (Brightspace-Bar): `{Objects,Next}` envelope + 37 measured key names (no `TimeLimit`); single-quiz route → web wave. |
+| A-14 | `grades/values/myGradeValues/` shape | PARTIAL (Brightspace-Bar): `grades/` bare array with `Id, Name, GradeObjectTypeId, AssociatedTool{ToolId,ToolItemId}` proven student-callable; `myGradeValues` probed but shape unrecorded → web wave. |
 | A-15 | `grades/final/values/myGradeValue` | |
-| A-16 | announcement `Body{Html,Text}` shape | |
+| A-16 | announcement `Body{Html,Text}` shape | RESOLVED (Brightspace-Bar): 19-key NewsItem incl. `Body{Text,Html}`, `Attachments[{FileId,FileName,Size}]`, `IsPublished`, `StartDate`/`CreatedDate` fallback; 467 items in one course. `docs/evidence/brightspace-bar-sweep.md` A-16. |
 | A-17 | `content/toc` endpoint and shape | |
 | A-18 | `content/topics/{id}` | |
 | A-19 | `content/topics/{id}/file` streams bytes | |
 | A-20 | discussions forums/topics/posts routes | |
-| A-21 | `calendar/events/` route | |
-| A-22 | concurrency 6 is safe on the tenant | |
-| A-23 | empty_results only with opt-in flag | |
-| A-24 | JWT `exp` claim decodable, ~1 h | |
-| A-25 | LP 1.62 / LE 1.96 still current | |
-| A-26 | state dir conventions per OS | |
-| A-27 | retry policy 3× jittered backoff on 429/5xx | |
-| A-28 | untrusted wrapper format | |
-| A-29 | MFA number-match selector `#idRichContext_DisplaySign` still valid | |
-| A-30 | campus selector text `Purdue West Lafayette` still valid | |
-| A-31 | PDF export of this PRD via a locally available tool | |
+| A-21 | `calendar/events/` route | PARTIAL (Brightspace-Bar): calendar route answers 200 but is empty on this tenant (`DisplayInCalendar:false` everywhere); `upcoming` computes from item due dates. Route string → web wave. |
+| A-22 | concurrency 6 is safe on the tenant | RESOLVED (Brightspace-Bar): production runs courses sequentially with 4 routes in `Promise.all` (~55 requests/run, never a 429 observed); "6" is macOS URLSession default, not a tenant limit. `bs` uses a bounded pool of 4 courses × 4 routes max with 429 backoff as a safety net. |
+| A-23 | empty_results only with opt-in flag | RESOLVED (gogcli): opt-in `--fail-empty` (aliases `--non-empty`, `--require-results`) on list commands; output still written, then a messageless exit 3 (`internal/cmd/paging.go:8-15`). Sweep §12. |
+| A-24 | JWT `exp` claim decodable, ~1 h | PARTIAL (Brightspace-Bar): no mint body ever recorded; 3600 s is a documented prior (`PollPolicyTests.swift:15`); no `exp` decoding exists. `bs` decodes `exp` defensively and falls back to 3600 s − 60 s. Web wave cites base64url decode. |
+| A-25 | LP 1.62 / LE 1.96 still current | RESOLVED (Brightspace-Bar): `GET /d2l/api/versions/` was called; LP 1.62 / LE 1.96 stable across captures (`fetch-engine.mjs:31-33`). Response shape → web wave. |
+| A-26 | state dir conventions per OS | PARTIAL (gogcli): macOS = `os.UserConfigDir()` → `~/Library/Application Support/<app>`; Linux/BSD split config `~/.config`, data `~/.local/share`, state `~/.local/state`; overrides must be absolute; dirs 0700, secret files 0600 atomic (`internal/config/layout.go:245-286, 432-439`). Sweep §11. Web wave confirms XDG/env-paths. |
+| A-27 | retry policy 3× jittered backoff on 429/5xx | RESOLVED (gogcli): 429 → up to 3 retries honoring `Retry-After`, else `1s<<attempt` + jitter in [0, base/2); 5xx → 1 retry after 1 s; 4xx never retried; exhausted → return the response so classification yields 7/8 (`internal/googleapi/retry_constants.go:5-14`, `transport.go:222-280`). Sweep §9. |
+| A-28 | untrusted wrapper format | RESOLVED (gogcli): markers `<<<EXTERNAL_UNTRUSTED_CONTENT id="<16 hex>">>>` / `<<<END_EXTERNAL_UNTRUSTED_CONTENT id="…">>>` with `Source:` line, per-string wrapping by key allow/deny lists, sanitization of embedded markers and LLM special tokens, top-level `externalContent` sentinel (`internal/outfmt/untrusted.go:91-110, 170-217`). Sweep §5. `bs` adopts this format with `Source: brightspace`. |
+| A-29 | MFA number-match selector `#idRichContext_DisplaySign` still valid | RESOLVED (Brightspace-Bar): `#idRichContext_DisplaySign` proven live twice (numbers 72 and 68), `rungs/browser.mjs:44-52, 173-186`. |
+| A-30 | campus selector text `Purdue West Lafayette` still valid | RESOLVED (Brightspace-Bar): `getByText(/Purdue West Lafayette/i)` on `/d2l/login`; KMSI marker rule; chain campus → sso.purdue.edu → login.microsoftonline.com (`login-flow.mjs:62-118`). |
+| A-31 | PDF export of this PRD via a locally available tool | RESOLVED (local test): `npx marked` → HTML → `Google Chrome --headless=new --print-to-pdf` produced a PDF in the scratchpad on 2026-09-02. |
 
 ## 13. Milestones (to become beads)
 
