@@ -231,8 +231,15 @@ if (!gate.enabled) {
   test('tier 0: --wrap-untrusted marks a fetched text field', async () => {
     const run = await bs(['courses', 'list', '--json', '--wrap-untrusted']);
     assertExit(run, 0);
-    assert.match(run.stdout, /<<<EXTERNAL_UNTRUSTED_CONTENT id="/, describeRun(run));
-    assert.match(run.stdout, /<<<END_EXTERNAL_UNTRUSTED_CONTENT id="/, describeRun(run));
+    // The markers live inside JSON string values, so match the parsed field, not the raw stdout
+    // (JSON escapes the quote in id="...").
+    const { items } = parseJsonStdout<{ items: Array<{ name: string }> }>(run);
+    assert.ok(items.length > 0, describeRun(run));
+    assert.match(
+      items[0].name,
+      /^<<<EXTERNAL_UNTRUSTED_CONTENT id="[0-9a-f]{16}">>>\nSource: brightspace\n---\n[\s\S]+\n<<<END_EXTERNAL_UNTRUSTED_CONTENT id="[0-9a-f]{16}">>>$/,
+      describeRun(run),
+    );
   });
 
   test('tier 0: --plain writes a TSV header row', async () => {
