@@ -1,0 +1,39 @@
+[
+  {
+    "Entity": { "EntityId": 2094411, "EntityType": "User", "DisplayName": "Ada Lovelace" },
+    "Status": 1,
+    "Feedback": {
+      "Score": 92.5,
+      "Feedback": {
+        "Text": "Nice work; cite the second source next time.",
+        "Html": "<p>Nice work; cite the <em>second</em> source next time.</p>"
+      },
+      "RubricAssessments": [],
+      "IsGraded": true,
+      "Files": [{ "FileId": 55001, "FileName": "hw3-annotated.pdf", "Size": 10240 }],
+      "Links": []
+    },
+    "Submissions": [
+      {
+        "Id": 31001,
+        "SubmittedBy": { "Id": "2094411", "DisplayName": "Ada Lovelace" },
+        "SubmissionDate": "2026-02-28T22:14:05.000Z",
+        "Comment": { "Text": "Here is my homework.", "Html": "<p>Here is my homework.</p>" },
+        "Files": [
+          { "FileId": 41001, "FileName": "hw3.pdf", "Size": 204800, "isRead": true, "isFlagged": false },
+          { "FileId": 41002, "FileName": "code.zip", "Size": 51200, "isRead": false, "isFlagged": false }
+        ]
+      },
+      {
+        "Id": 31000,
+        "SubmittedBy": { "Id": "2094411", "DisplayName": "Ada Lovelace" },
+        "SubmissionDate": "2026-02-27T19:03:11.000Z",
+        "Comment": { "Text": "", "Html": "" },
+        "Files": [
+          { "FileId": 40999, "FileName": "hw3-draft.pdf", "Size": 190000, "isRead": true, "isFlagged": true }
+        ]
+      }
+    ],
+    "CompletionDate": "2026-02-28T22:14:05.000Z"
+  }
+]
