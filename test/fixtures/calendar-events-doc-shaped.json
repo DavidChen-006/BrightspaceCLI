@@ -1,0 +1,59 @@
+{
+  "Objects": [
+    {
+      "CalendarEventId": 91002,
+      "OrgUnitId": 412690,
+      "Title": "Problem Set 2 - Due",
+      "Description": "Submit via the dropbox. Late work loses 10%/day.",
+      "StartDateTime": "2026-09-10T03:59:00.000Z",
+      "EndDateTime": "2026-09-10T03:59:00.000Z",
+      "IsAllDayEvent": false,
+      "StartDay": null,
+      "EndDay": null,
+      "GroupId": null,
+      "IsRecurring": false,
+      "RecurrenceInfo": null,
+      "LocationId": null,
+      "LocationName": "",
+      "OrgUnitName": "Purdue Civics Knowledge Test",
+      "OrgUnitCode": "CIVICS-TEST",
+      "IsAssociatedWithEntity": true,
+      "AssociatedEntity": {
+        "AssociatedEntityType": "Dropbox",
+        "AssociatedEntityId": "440703",
+        "Link": "https://purdue.brightspace.com/d2l/lms/dropbox/user/folder_submit_files.d2l?db=440703&grpid=0&ou=412690"
+      },
+      "HasVisibilityRestrictions": false,
+      "VisibilityRestrictions": null,
+      "CalendarEventViewUrl": "https://purdue.brightspace.com/d2l/le/calendar/412690/event/91002/detailsview",
+      "EventType": 6,
+      "Presenters": []
+    },
+    {
+      "CalendarEventId": 91001,
+      "OrgUnitId": 1498777,
+      "Title": "Labor Day - no class",
+      "Description": "",
+      "StartDateTime": "2026-09-07T04:00:00Z",
+      "EndDateTime": "2026-09-08T03:59:59Z",
+      "IsAllDayEvent": true,
+      "StartDay": "2026-09-07",
+      "EndDay": "2026-09-07",
+      "GroupId": null,
+      "IsRecurring": false,
+      "RecurrenceInfo": null,
+      "LocationId": null,
+      "LocationName": "",
+      "OrgUnitName": "Intro to Something",
+      "OrgUnitCode": "SOME-101",
+      "IsAssociatedWithEntity": false,
+      "AssociatedEntity": null,
+      "HasVisibilityRestrictions": false,
+      "VisibilityRestrictions": null,
+      "CalendarEventViewUrl": null,
+      "EventType": 1,
+      "Presenters": []
+    }
+  ],
+  "Next": null
+}

@@ -1,0 +1,38 @@
+[
+  {
+    "ForumId": 12001,
+    "StartDate": "2026-08-24T04:00:00.000Z",
+    "EndDate": null,
+    "PostStartDate": null,
+    "PostEndDate": null,
+    "Name": "Weekly Discussions",
+    "Description": { "Text": "One thread per week. Reply to two classmates.", "Html": "<p>One thread per week. Reply to two classmates.</p>" },
+    "ShowDescriptionInTopics": true,
+    "AllowAnonymous": false,
+    "IsLocked": false,
+    "IsHidden": false,
+    "RequiresApproval": false,
+    "DisplayInCalendar": false,
+    "DisplayPostDatesInCalendar": false,
+    "StartDateAvailabilityType": 0,
+    "EndDateAvailabilityType": null
+  },
+  {
+    "ForumId": 12002,
+    "StartDate": null,
+    "EndDate": "2026-12-20T04:59:00Z",
+    "PostStartDate": "2026-08-24T04:00:00.000Z",
+    "PostEndDate": "2026-12-20T04:59:00.000Z",
+    "Name": "Q&A",
+    "Description": { "Text": "", "Html": "" },
+    "ShowDescriptionInTopics": null,
+    "AllowAnonymous": true,
+    "IsLocked": false,
+    "IsHidden": false,
+    "RequiresApproval": true,
+    "DisplayInCalendar": false,
+    "DisplayPostDatesInCalendar": false,
+    "StartDateAvailabilityType": null,
+    "EndDateAvailabilityType": 0
+  }
+]
