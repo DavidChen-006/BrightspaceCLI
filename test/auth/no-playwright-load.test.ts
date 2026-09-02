@@ -39,7 +39,7 @@ test('the probe detects playwright-core when it is imported (positive control)',
   }
 });
 
-test('--help, version, schema and auth status never load playwright-core', async () => {
+test('--help, version, schema, auth status and auth doctor --help never load playwright-core', async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), 'bs-probe-'));
   try {
     const cases: [string[], number][] = [
@@ -47,6 +47,7 @@ test('--help, version, schema and auth status never load playwright-core', async
       [['version', '--json'], 0],
       [['schema', '--json'], 0],
       [['auth', 'status', '--json'], 4],
+      [['auth', 'doctor', '--help'], 0],
     ];
     const results = await Promise.all(
       cases.map(([argv]) => probe(['cli', ...argv], path.join(root, argv.join('-')))),

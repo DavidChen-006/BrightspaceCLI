@@ -75,6 +75,8 @@ export interface PlaywrightModule {
       userDataDir: string,
       options: LaunchOptions,
     ): Promise<BrowserContextLike>;
+    /** Where playwright's own Chromium download would be (it may not exist): `bs auth doctor`. */
+    executablePath?(): string;
   };
 }
 

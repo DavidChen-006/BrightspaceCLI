@@ -27,6 +27,13 @@ sections your ticket cites before writing code.
   full rung), runs `climb` with `allowFull: true`, prints the `auth status` shape, and maps
   `rung.failure` to a specific hint (exit 4). `--save-credentials` writes `credentials.json`
   only after a successful login. The MFA relay is a plain stderr line via `ctx.log`.
+  `doctor [--install-browser]` (bs-6cu) is the read-only diagnosis: it never climbs a rung, never
+  mints and never creates the root; it runs `runDoctor()` from `src/auth/doctor.ts`, emits
+  `{ok, root, baseUrl, browserChannel, checks[{name, ok, status: ok|warn|fail, detail, hint?}]}`
+  (human: a ✓/!/✗ table on stdout), then throws `ConfigError` (10) when a check failed or
+  `RetryableError` (8) when the only failure is an unreachable tenant. `--install-browser` asks
+  `Download Chromium (~300 MB) ...? [y/N]` on stderr (non-interactive/--no-input: `UsageError` 2
+  with the command in the hint), runs `deps.install` and re-runs only the browser check.
 - `src/cli/commands/whoami.ts`, `src/cli/commands/courses.ts` — `bs whoami`, `bs courses list|get`
   (bs-0am): thin actions that parse flags, call `src/d2l/` through `withData`, shape, emit.
 - `src/cli/commands/quizzes.ts` — `bs quizzes list|get|attempts <ou> [<quizId>]` (bs-440): `list`
@@ -115,6 +122,20 @@ sections your ticket cites before writing code.
   `unknown-account`, `mfa-timeout`, `mfa-denied`, `no-field`, `no-xsrf`, `browser`, `error`) so
   `bs auth login` can hint. Headless unless `input.headed`. `RunIO.fullRung` is the test seam
   for how `bs auth login` builds it; `createContext()` never registers a full rung.
+- `src/auth/doctor.ts` — the `bs auth doctor` checks, each a `{name, ok, status, detail, hint?}`
+  row: `node` (>= 22.12), `root` (path, origin, exists/writable; a missing root is fine), `permissions`
+  (0700 dirs, 0600 secret files; config.json only warns; skipped on Windows), `session` (cached
+  `jwtExpiresAt` only: fresh / expired warn → `bs auth status` / none warn → login), `profile`
+  (non-empty `profile/`), `playwright` (lazy import + package version), `browser` (`chromium` →
+  `chromium.executablePath()` exists; `chrome`/`msedge` families → playwright's per-platform paths in
+  `channelExecutables()`; other channels warn) and the anonymous `GET /d2l/api/versions/` as
+  `tenant` + `lp` + `le` (configured == LatestVersion ok; in SupportedVersions warn with
+  `BS_LP_VERSION=<latest>`; else fail; unreachable → `tenant` fails with a retry hint and lp/le are
+  "not checked"). Every probe is behind `DoctorDeps` (`RunIO.doctor` overrides it in tests):
+  `nodeVersion`, `platform`, `importer`, `playwrightVersion`, `fileExists`, `cliPath` (resolved from
+  `playwright-core/package.json`, since `cli.js` is not in the exports map) and `install` (default
+  `spawnInstaller`: `node <cli.js> install chromium`, both child streams to stderr). The install hint
+  always names the command, the ~300 MB cost and `BS_BROWSER_CHANNEL=chrome` as the no-download route.
 - `src/auth/credentials.ts` — where `bs auth login` gets its credentials, in one fixed order:
   `BS_EMAIL` + `BS_PASSWORD` (both or neither; one alone is `ConfigError` exit 10) →
   `--email` + `--password-stdin` (whole stdin, one trailing newline trimmed) → `credentials.json`
@@ -167,7 +188,9 @@ sections your ticket cites before writing code.
   `transport` to script HTTP); `test/helpers/http.ts` fakes the transport; `test/helpers/auth.ts`
   builds fake sessions/JWTs, loads the auth fixtures and asserts secret-free output.
   `test/auth/no-playwright-load.test.ts` spawns `test/helpers/playwright-probe.ts` to prove
-  `--help`, `version`, `schema` and `auth status` never load `playwright-core`.
+  `--help`, `version`, `schema`, `auth status` and `auth doctor --help` never load `playwright-core`.
+  `test/auth/doctor-command.test.ts` drives `bs auth doctor` with fake `RunIO.doctor` deps (no
+  download, no launch) and a scripted versions probe.
   `test/fixtures/` holds recorded payloads with a provenance README. `test/live/` (behind
   `BS_LIVE=1`) is the only place that may touch the tenant.
 - `test/commands/<name>.test.ts` — hermetic command suites: seed a session in a temp `--root`
