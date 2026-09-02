@@ -15,6 +15,7 @@ import { register as registerDiscussions } from './discussions.js';
 import { register as registerGrades } from './grades.js';
 import { register as registerQuizzes } from './quizzes.js';
 import { register as registerSchema } from './schema.js';
+import { register as registerSkill } from './skill.js';
 import { register as registerUpcoming } from './upcoming.js';
 import { register as registerVersion } from './version.js';
 import { register as registerWhoami } from './whoami.js';
@@ -33,6 +34,7 @@ export const commands: readonly Registrar[] = [
   registerQuizzes,
   registerGrades,
   registerSchema,
+  registerSkill,
   registerUpcoming,
   registerVersion,
   registerWhoami,
