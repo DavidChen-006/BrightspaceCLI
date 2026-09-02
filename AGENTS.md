@@ -20,6 +20,14 @@ sections your ticket cites before writing code.
 - `src/core/errors.ts` — `BsError` classes, `EXIT_CODES`, `exitCodeFor()`, `formatError()`.
 - `src/core/output.ts` — JSON/TSV writers, `--select`, `--results-only`, untrusted wrapping,
   `Table`, color.
+- `src/core/http/` — the one HTTP seam (PRD 9), imported via `index.js`: `client.ts`
+  (`createHttp()` with injectable transport/clock/sleep/random/log, read-only guard, retries,
+  first-byte timeout, `withBearer`), `classify.ts` (`classify()`, `problemDetails()`, `readJson()`,
+  `toError()` → BsError + exit code), `paginate.ts` (`pagedResultSet`, `objectListPage`,
+  `pageNumbered`, `collect`), `pool.ts` (`boundedPool`), `url.ts` (`d2lUrl`). Commands never call
+  `fetch` directly; tests inject a fake transport (`test/helpers/http.ts`).
+- `src/core/dates.ts` — `toD2lDateTime()` (UTCDateTime with milliseconds) and `isoSeconds()`
+  (whole-second UTC or null).
 - `src/schema/schema.ts` — `bs schema --json` from the live commander tree.
 - `src/buildinfo.ts` — version from `package.json`; commit/date from `dist/buildinfo.json`
   (written by `scripts/buildinfo.mjs` during `npm run build`; "unknown" in dev).
