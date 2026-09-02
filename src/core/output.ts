@@ -8,9 +8,14 @@ import { randomBytes } from 'node:crypto';
 
 export type OutputMode = 'json' | 'plain' | 'human';
 
-/** Minimal writable surface shared by process.stdout and test sinks. */
+/**
+ * Minimal writable surface shared by process.stdout and test sinks. Text writers pass strings;
+ * the download verbs pass raw bytes (`--out -`). A `false` from `write` means the sink wants a
+ * `drain` before more; sinks without `once` are assumed unbounded.
+ */
 export interface Sink {
-  write(chunk: string): unknown;
+  write(chunk: string | Uint8Array): unknown;
+  once?(event: 'drain', listener: () => void): unknown;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -287,17 +292,46 @@ const METADATA_KEYS = new Set([
 ]);
 const METADATA_SUFFIXES = ['id', 'ids', 'url', 'link', 'date', 'time', 'at'];
 
+/**
+ * Any key spelled `<something>Html` or `<something>Text` is a rendering of tenant free text
+ * (`instructionsHtml`, `feedbackHtml`, `bodyText`, ...), so it is content unless it is an
+ * explicit metadata key. Deny still wins: `mimeType` is not text.
+ */
+const CONTENT_SUFFIXES = ['html', 'text'];
+
+/**
+ * Keys that are content only on rows of a given `kind`. A content Topic's `path` is the
+ * instructor-authored module titles joined with " / "; the `path` of a download summary is a
+ * filesystem path and stays a plain string.
+ */
+const CONTENT_KEYS_BY_KIND: Readonly<Record<string, ReadonlySet<string>>> = {
+  content: new Set(['path']),
+};
+const NO_KEYS: ReadonlySet<string> = new Set();
+
 function normalizeKey(key: string): string {
   return key.replace(/[_-]/g, '').toLowerCase();
 }
 
-function shouldWrap(key: string, ancestors: readonly string[]): boolean {
+function shouldWrap(
+  key: string,
+  ancestors: readonly string[],
+  siblingContent: ReadonlySet<string>,
+): boolean {
   const k = normalizeKey(key);
+  if (siblingContent.has(k)) return true;
   if (METADATA_KEYS.has(k)) return false;
   if (METADATA_SUFFIXES.some((s) => k.length > s.length && k.endsWith(s))) return false;
   if (CONTENT_KEYS.has(k)) return true;
+  if (CONTENT_SUFFIXES.some((s) => k.endsWith(s))) return true;
   // Strings inside arrays keep their array's key, so include the key itself here.
   return [...ancestors, key].some((a) => CONTENT_ARRAY_KEYS.has(normalizeKey(a)));
+}
+
+/** The keys a record's `kind` promotes to content for its direct children. */
+function contentKeysForKind(record: Record<string, unknown>): ReadonlySet<string> {
+  const kind = record.kind;
+  return typeof kind === 'string' ? (CONTENT_KEYS_BY_KIND[kind] ?? NO_KEYS) : NO_KEYS;
 }
 
 function walk(
@@ -305,11 +339,12 @@ function walk(
   options: UntrustedOptions,
   key: string,
   ancestors: readonly string[],
+  siblingContent: ReadonlySet<string>,
 ): { value: unknown; wrapped: boolean } {
   if (typeof value === 'string') {
     if (value === '') return { value, wrapped: false };
     const top = key === '' && ancestors.length === 0;
-    if (top || shouldWrap(key, ancestors)) {
+    if (top || shouldWrap(key, ancestors, siblingContent)) {
       return { value: wrapUntrustedText(value, options), wrapped: true };
     }
     return { value, wrapped: false };
@@ -317,7 +352,7 @@ function walk(
   if (Array.isArray(value)) {
     let wrapped = false;
     const out = value.map((item) => {
-      const r = walk(item, options, key, ancestors);
+      const r = walk(item, options, key, ancestors, siblingContent);
       wrapped = wrapped || r.wrapped;
       return r.value;
     });
@@ -327,8 +362,9 @@ function walk(
     let wrapped = false;
     const out: Record<string, unknown> = {};
     const nextAncestors = key === '' ? ancestors : [...ancestors, key];
+    const byKind = contentKeysForKind(value);
     for (const [k, v] of Object.entries(value)) {
-      const r = walk(v, options, k, nextAncestors);
+      const r = walk(v, options, k, nextAncestors, byKind);
       out[k] = r.value;
       wrapped = wrapped || r.wrapped;
     }
@@ -343,7 +379,7 @@ function walk(
  */
 export function wrapUntrusted(value: unknown, options: UntrustedOptions): unknown {
   const source = options.source ?? UNTRUSTED_SOURCE;
-  const result = walk(value, { ...options, source }, '', []);
+  const result = walk(value, { ...options, source }, '', [], NO_KEYS);
   if (isRecord(result.value)) {
     return {
       ...result.value,

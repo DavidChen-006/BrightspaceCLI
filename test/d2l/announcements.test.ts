@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { parseSince, safeFileName } from '../../src/cli/commands/announcements.js';
+import { parseSince } from '../../src/cli/commands/announcements.js';
 import {
   type Announcement,
   announcementOf,
@@ -202,19 +202,4 @@ test('parseSince: ISO timestamps, calendar dates (UTC midnight) and relative dur
   ]) {
     assert.throws(() => parseSince(bad, NOW), /expected/, JSON.stringify(bad));
   }
-});
-
-test('safeFileName: basename only, control characters and leading dots stripped, fallback when empty', () => {
-  assert.equal(safeFileName('How to Modify.pdf', 'x'), 'How to Modify.pdf');
-  assert.equal(safeFileName('../../etc/passwd', 'x'), 'passwd');
-  assert.equal(safeFileName('..\\..\\evil.exe', 'x'), 'evil.exe');
-  assert.equal(safeFileName('.hidden', 'x'), 'hidden');
-  assert.equal(safeFileName('a b\nc.txt', 'x'), 'abc.txt');
-  assert.equal(safeFileName('  ', 'attachment-5'), 'attachment-5');
-  assert.equal(safeFileName(null, 'attachment-5'), 'attachment-5');
-  assert.equal(safeFileName('..', 'attachment-5'), 'attachment-5');
-  const long = `${'a'.repeat(300)}.pdf`;
-  const trimmed = safeFileName(long, 'x');
-  assert.ok(trimmed.length <= 200, String(trimmed.length));
-  assert.ok(trimmed.endsWith('.pdf'));
 });

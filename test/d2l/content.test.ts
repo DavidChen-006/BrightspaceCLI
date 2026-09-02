@@ -7,10 +7,8 @@ import {
   contentTocUrl,
   contentTopicFileUrl,
   contentTopicUrl,
-  filenameFromContentDisposition,
   flattenToc,
   moduleChildOf,
-  safeFileName,
   tocTree,
   topicDetailOf,
   topicTypeName,
@@ -239,34 +237,4 @@ test('moduleChildOf: Type 0 is a module summary, Type 1 a topic detail', () => {
   assert.equal(moduleChildOf({ Type: 2, Id: 1 }, OU, BASE), null);
   assert.equal(moduleChildOf({ Type: 0 }, OU, BASE), null);
   assert.equal(moduleChildOf('x', OU, BASE), null);
-});
-
-test('filenameFromContentDisposition: RFC 5987 filename* wins, then quoted, then bare', () => {
-  assert.equal(
-    filenameFromContentDisposition(
-      'attachment; filename="lecture01.pdf"; filename*=UTF-8\'\'r%C3%A9sum%C3%A9.pdf',
-    ),
-    'résumé.pdf',
-  );
-  assert.equal(
-    filenameFromContentDisposition('attachment; filename="lecture 01.pdf"'),
-    'lecture 01.pdf',
-  );
-  assert.equal(filenameFromContentDisposition('inline; filename=notes.txt'), 'notes.txt');
-  assert.equal(filenameFromContentDisposition("attachment; filename*=utf-8''%ZZbad"), null);
-  assert.equal(filenameFromContentDisposition('attachment'), null);
-  assert.equal(filenameFromContentDisposition(undefined), null);
-});
-
-test('safeFileName: basename only, no control or reserved characters, fallback when empty', () => {
-  assert.equal(safeFileName('../../etc/passwd', 'topic-1'), 'passwd');
-  assert.equal(safeFileName('C:\\Users\\x\\slides.pdf', 'topic-1'), 'slides.pdf');
-  assert.equal(safeFileName('  .hidden  ', 'topic-1'), 'hidden');
-  assert.equal(safeFileName('a<b>c:d"e|f?g*h\u0000.pdf', 'topic-1'), 'abcdefgh.pdf');
-  assert.equal(safeFileName('', 'topic-1'), 'topic-1');
-  assert.equal(safeFileName('...', 'topic-1'), 'topic-1');
-  assert.equal(safeFileName('Lecture 1: slides / notes', 'topic-1'), 'notes');
-  const long = safeFileName(`${'x'.repeat(300)}.pdf`, 'topic-1');
-  assert.ok(long.length <= 200, `${long.length} chars`);
-  assert.ok(long.endsWith('.pdf'));
 });

@@ -248,3 +248,83 @@ test('color resolution: forced off under json/plain, NO_COLOR honored, always wi
   assert.equal(colorize('x', 'red', false), 'x');
   assert.equal(colorize('x', 'red', true), '\x1b[31mx\x1b[39m');
 });
+
+test('wrapUntrusted wraps every *Html / *Text key and nested {text, html} rich text (bs-1l3)', () => {
+  const id = '2222222222222222';
+  const out = wrapUntrusted(
+    {
+      id: 5,
+      instructionsHtml: '<p>Read <b>chapter 2</b></p>',
+      feedbackHtml: '<i>Good work</i>',
+      commentsHtml: '<p>See rubric</p>',
+      bodyText: 'plain body',
+      descriptionHtml: '<p>desc</p>',
+      instructions: { text: 'Submit a PDF', html: '<p>Submit a PDF</p>' },
+      feedback: { text: 'Nice', html: '<b>Nice</b>', score: 9.5, isGraded: true },
+      fileName: 'hw3.pdf',
+      url: 'https://example.edu/d2l/le/1/2',
+      dueDate: '2026-09-15T23:59:00Z',
+      lastModified: '2026-09-01T00:00:00Z',
+      mimeType: 'text/html',
+    },
+    { id },
+  ) as Record<string, unknown>;
+  const wrapped = (v: unknown) =>
+    typeof v === 'string' && v.startsWith(`${MARKER_START} id="${id}"`);
+  for (const k of [
+    'instructionsHtml',
+    'feedbackHtml',
+    'commentsHtml',
+    'bodyText',
+    'descriptionHtml',
+  ]) {
+    assert.ok(wrapped(out[k]), `${k} wrapped`);
+  }
+  const instructions = out.instructions as Record<string, unknown>;
+  const feedback = out.feedback as Record<string, unknown>;
+  assert.ok(wrapped(instructions.text), 'instructions.text wrapped');
+  assert.ok(wrapped(instructions.html), 'instructions.html wrapped');
+  assert.ok(wrapped(feedback.text), 'feedback.text wrapped');
+  assert.ok(wrapped(feedback.html), 'feedback.html wrapped');
+  assert.equal(feedback.score, 9.5);
+  assert.equal(feedback.isGraded, true);
+  assert.equal(out.id, 5);
+  assert.equal(out.fileName, 'hw3.pdf');
+  assert.equal(out.url, 'https://example.edu/d2l/le/1/2');
+  assert.equal(out.dueDate, '2026-09-15T23:59:00Z');
+  assert.equal(out.lastModified, '2026-09-01T00:00:00Z');
+  assert.equal(out.mimeType, 'text/html', 'metadata keys win over the suffix rule');
+});
+
+test('wrapUntrusted wraps a content Topic path (module titles) but never a download path (bs-2o2)', () => {
+  const id = '4444444444444444';
+  const topic = wrapUntrusted(
+    { id: 1, kind: 'content', path: 'Week 1: Foundations / Lectures', title: 'Slides' },
+    { id },
+  ) as Record<string, string>;
+  assert.ok(topic.path.startsWith(`${MARKER_START} id="${id}"`), 'content path wrapped');
+  assert.ok(topic.path.includes('Week 1: Foundations / Lectures'));
+  assert.equal(topic.kind, 'content');
+
+  const list = wrapUntrusted(
+    { items: [{ id: 2, kind: 'content', path: 'Week 2', title: 'T' }], count: 1 },
+    { id },
+  ) as { items: Record<string, string>[] };
+  assert.ok(list.items[0]?.path.startsWith(MARKER_START), 'nested list rows too');
+
+  const download = wrapUntrusted(
+    { topicId: 1, fileName: 'lecture01.pdf', path: '/tmp/out/lecture01.pdf', bytes: 3 },
+    { id },
+  ) as Record<string, unknown>;
+  assert.equal(download.path, '/tmp/out/lecture01.pdf');
+  const nullPath = wrapUntrusted({ id: 3, kind: 'content', path: null }, { id }) as Record<
+    string,
+    unknown
+  >;
+  assert.equal(nullPath.path, null);
+  const other = wrapUntrusted({ id: 4, kind: 'assignment', path: 'Week 1' }, { id }) as Record<
+    string,
+    unknown
+  >;
+  assert.equal(other.path, 'Week 1', 'only content rows treat path as instructor text');
+});

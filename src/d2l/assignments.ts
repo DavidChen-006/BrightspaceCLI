@@ -13,15 +13,14 @@
  *   `CustomInstructions` is `{Text, Html}`; the six counters are -1 for a learner (not
  *   surfaced); enums arrive as ints on this tenant but the docs allow names, so both decode.
  */
-import type { TenantConfig } from '../core/config.js';
 import { isoSeconds } from '../core/dates.js';
 import { BsError } from '../core/errors.js';
 import { d2lUrl, displayPath, type HttpClient } from '../core/http/index.js';
-import { d2lId, isRecord, optionalBoolean, optionalString } from './common.js';
+import { d2lId, isRecord, type LeTenant, optionalBoolean, optionalString } from './common.js';
 import { assignmentUrl } from './links.js';
 
-/** What an LE route needs to know about the tenant. */
-export type LeTenant = Pick<TenantConfig, 'baseUrl' | 'leVersion'>;
+/** The LE tenant view lives in `common.ts`; re-exported so existing imports keep resolving. */
+export type { LeTenant } from './common.js';
 
 // ---------------------------------------------------------------------------------------------
 // Wire shapes (documented fields only; parsers tolerate anything missing)
@@ -451,57 +450,4 @@ export function submissionOf(
     submissions: submissionEntriesOf(item.Submissions),
     url: assignmentUrl(baseUrl, ou, folderId),
   };
-}
-
-// ---------------------------------------------------------------------------------------------
-// File names for downloads
-// ---------------------------------------------------------------------------------------------
-
-/**
- * RFC 6266: `filename*=charset'lang'percent-encoded` wins over `filename="..."` / `filename=...`.
- * Returns the raw (unsanitised) name or null when the header names nothing.
- */
-export function contentDispositionFilename(header: string | undefined): string | null {
-  if (header === undefined) return null;
-  const extended = /filename\*\s*=\s*([^']*)'[^']*'([^;]+)/i.exec(header);
-  if (extended?.[2]) {
-    const encoded = extended[2].trim().replace(/^"|"$/g, '');
-    try {
-      const decoded = decodeURIComponent(encoded);
-      if (decoded.trim() !== '') return decoded;
-    } catch {
-      // Fall through to the plain form.
-    }
-  }
-  const quoted = /filename\s*=\s*"((?:[^"\\]|\\.)*)"/i.exec(header);
-  if (quoted?.[1] !== undefined) {
-    const name = quoted[1].replace(/\\(.)/g, '$1');
-    return name.trim() === '' ? null : name;
-  }
-  const bare = /filename\s*=\s*([^;]+)/i.exec(header);
-  if (bare?.[1] !== undefined) {
-    const name = bare[1].trim();
-    return name === '' ? null : name;
-  }
-  return null;
-}
-
-const MAX_FILE_NAME_BYTES = 255;
-
-/**
- * A single path component safe to join under the out directory: directories stripped (both
- * separators), control characters removed, leading dots dropped (no hidden or `..` names),
- * whitespace trimmed, length capped; `fallback` when nothing usable remains.
- */
-export function safeFileName(raw: string | null | undefined, fallback: string): string {
-  if (typeof raw !== 'string') return fallback;
-  const last = raw.split(/[\\/]/).pop() ?? '';
-  let name = last
-    // biome-ignore lint/suspicious/noControlCharactersInRegex: control characters are what we strip
-    .replace(/[\u0000-\u001f\u007f]/g, '')
-    .replace(/^\.+/, '')
-    .trim();
-  if (name === '') return fallback;
-  while (Buffer.byteLength(name, 'utf8') > MAX_FILE_NAME_BYTES) name = name.slice(0, -1);
-  return name === '' ? fallback : name;
 }

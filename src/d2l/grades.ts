@@ -14,15 +14,14 @@
  * - Every value is read, only `url` (the gradebook deep link) is computed; dates are whole-second
  *   UTC or null.
  */
-import type { TenantConfig } from '../core/config.js';
 import { isoSeconds } from '../core/dates.js';
 import { BsError, NotFoundError } from '../core/errors.js';
 import { d2lUrl, displayPath, type HttpClient } from '../core/http/index.js';
-import { d2lId, isRecord, optionalBoolean, optionalString } from './common.js';
+import { d2lId, isRecord, type LeTenant, optionalBoolean, optionalString } from './common.js';
 import { gradebookUrl } from './links.js';
 
-/** What an LE route needs to know about the tenant (the LE twin of `LpTenant`). */
-export type LeTenant = Pick<TenantConfig, 'baseUrl' | 'leVersion'>;
+/** The LE tenant view lives in `common.ts`; re-exported so existing imports keep resolving. */
+export type { LeTenant } from './common.js';
 
 // ---------------------------------------------------------------------------------------------
 // Wire shapes (documented fields only; parsers tolerate anything missing)

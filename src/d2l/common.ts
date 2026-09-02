@@ -8,6 +8,9 @@ import type { TenantConfig } from '../core/config.js';
 /** What an LP route needs to know about the tenant. */
 export type LpTenant = Pick<TenantConfig, 'baseUrl' | 'lpVersion'>;
 
+/** What an LE route needs to know about the tenant (the LE twin of `LpTenant`). */
+export type LeTenant = Pick<TenantConfig, 'baseUrl' | 'leVersion'>;
+
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

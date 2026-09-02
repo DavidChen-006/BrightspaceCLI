@@ -5,11 +5,9 @@ import {
   assignmentDetailOf,
   assignmentOf,
   attachmentUrl,
-  contentDispositionFilename,
   foldersUrl,
   folderUrl,
   mySubmissionsUrl,
-  safeFileName,
   submissionFileUrl,
   submissionOf,
 } from '../../src/d2l/assignments.js';
@@ -248,29 +246,4 @@ test('submissionOf: status accepts int or name; sparse entities decode with null
   });
   assert.equal(submissionOf(null, OU, 1, BASE), null);
   assert.equal(submissionOf('x', OU, 1, BASE), null);
-});
-
-test('contentDispositionFilename: RFC 6266 filename* wins over filename; missing → null', () => {
-  assert.equal(contentDispositionFilename('attachment; filename="hw3.pdf"'), 'hw3.pdf');
-  assert.equal(contentDispositionFilename('attachment; filename=hw3.pdf'), 'hw3.pdf');
-  assert.equal(
-    contentDispositionFilename(
-      'attachment; filename="x.pdf"; filename*=UTF-8\'\'r%C3%A9sum%C3%A9.pdf',
-    ),
-    'résumé.pdf',
-  );
-  assert.equal(contentDispositionFilename('inline'), null);
-  assert.equal(contentDispositionFilename(undefined), null);
-});
-
-test('safeFileName: strips directories, control characters and leading dots; falls back', () => {
-  assert.equal(safeFileName('hw3.pdf', 'fallback'), 'hw3.pdf');
-  assert.equal(safeFileName('../../etc/passwd', 'fallback'), 'passwd');
-  assert.equal(safeFileName('C:\\Users\\me\\notes.txt', 'fallback'), 'notes.txt');
-  assert.equal(safeFileName('..', 'fallback'), 'fallback');
-  assert.equal(safeFileName('.hidden', 'fallback'), 'hidden');
-  assert.equal(safeFileName('a\u0000b\nc.txt', 'fallback'), 'abc.txt');
-  assert.equal(safeFileName('   ', 'fallback'), 'fallback');
-  assert.equal(safeFileName(null, 'file-90001'), 'file-90001');
-  assert.equal(safeFileName(`${'x'.repeat(300)}.pdf`, 'f').length, 255);
 });
