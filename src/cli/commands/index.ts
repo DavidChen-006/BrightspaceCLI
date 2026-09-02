@@ -4,6 +4,7 @@
  */
 import type { Command } from 'commander';
 import type { CliContext } from '../context.js';
+import { register as registerAnnouncements } from './announcements.js';
 import { register as registerAssignments } from './assignments.js';
 import { register as registerAuth } from './auth.js';
 import { register as registerCourses } from './courses.js';
@@ -17,6 +18,7 @@ export type Registrar = (program: Command, ctx: CliContext) => void;
 
 export const commands: readonly Registrar[] = [
   registerAssignments,
+  registerAnnouncements,
   registerAuth,
   registerCourses,
   registerQuizzes,
