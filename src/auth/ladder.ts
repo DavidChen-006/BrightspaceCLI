@@ -38,6 +38,8 @@ export interface RungContext {
   config: TenantConfig;
   /** Verbose diagnostics; never pass a secret. */
   log: (line: string) => void;
+  /** A line the user sees regardless of --verbose (the "no browser" hint); never a secret. */
+  warn?: (line: string) => void;
 }
 
 /** A rung tries to produce live credentials; success is a Session, failure null or a throw. */
@@ -61,6 +63,8 @@ export interface ClimbInput {
   /** Skip the cached-JWT shortcut (a data route answered 401/sessionExpired). */
   forceMint?: boolean;
   log?: (line: string) => void;
+  /** Forwarded to the rungs as `RungContext.warn`. */
+  warn?: (line: string) => void;
   /** Milliseconds since the epoch; defaults to Date.now. */
   now?: () => number;
 }
@@ -136,7 +140,7 @@ async function climbRungs(
     if (rung.kind === 'silent') silentTried = true;
     let restored: Session | null;
     try {
-      restored = await rung.attempt({ paths, config, log });
+      restored = await rung.attempt({ paths, config, log, warn: input.warn });
     } catch (err) {
       if (err instanceof CancelledError) throw err;
       log(`auth: ${name} threw: ${describe(err)}`);
@@ -290,6 +294,7 @@ export async function authorizedHttp(
     allowFull: options.allowFull ?? false,
     forceMint: options.forceMint ?? false,
     log: (line) => ctx.debug(line),
+    warn: (line) => ctx.warn(line),
     now: options.now,
   });
   if (result.state === 'fresh' && result.session.jwt !== undefined) {

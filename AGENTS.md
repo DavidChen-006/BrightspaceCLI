@@ -48,6 +48,23 @@ sections your ticket cites before writing code.
   state, always writes `cache/status.json`), `authorizedHttp(ctx)` (Bearer-attaching client or
   `AuthRequiredError`/`RetryableError`) and `retryOnceOnSessionExpired()` for data commands.
   Browser rungs import `playwright-core` lazily and live in their own files.
+  `RungContext` also carries an optional `warn` (a line the user sees without `--verbose`;
+  `authorizedHttp` and `auth refresh` wire it to `ctx.warn`).
+- `src/auth/rungs/` — the browser rungs (PRD 7 rung 1, PRD 5 browser row). `browser.ts`: the
+  narrow `PageLike`/`LocatorLike`/`BrowserContextLike` seam, `withBrowser()` (lazy
+  `import('playwright-core')` through an injectable `importer`, `launchPersistentContext` on
+  `profile/` 0700, `channel` from `BS_BROWSER_CHANNEL`, always closed in `finally`) and the
+  login mechanics: `isAuthenticated()` (tenant `d2lSessionVal` AND `window.D2L.LP`),
+  `extractXsrf()` (D2L JS then the meta tag, 10 x 1 s), `clickThroughSilentSurfaces()` (campus
+  text on `/d2l/login`; `#idSIButton9` only behind a KMSI marker), `trySilentLogin()` (goto
+  `/d2l/home`, 30 s, fail fast on an email field) and `harvestSession()` (cookies filtered to
+  the tenant host + XSRF → `buildSession`). Browser-side JS is the exported `*_JS` strings so a
+  fake page can match them. `silent.ts`: `silentRung()` (`kind: 'silent'`, headless; a missing
+  `playwright-core` or browser executable is a null plus a one-line `Run: bs auth doctor` on
+  `warn`, never a throw). `createContext()` registers it by default; `RunIO.rungs` overrides it
+  (tests get `rungs: []` from `test/helpers/cli.ts`, so no test ever opens a real browser) and
+  `RunIO.stdin` feeds prompts. `test/helpers/browser.ts` is the scripted `FakeBrowser`
+  (surfaces, clicks, waits on a fake clock, a fake importer).
 - `src/d2l/` — the typed D2L route layer commands call (one file per resource, evidence in
   `docs/evidence/d2l-api-web.md`). `common.ts`: `LpTenant`, `d2lId()` (string D2LID → number when
   numeric), `orgUnitRefOf()`. `links.ts`: every deep-link template from PRD 6.3 (`courseHomeUrl`,
@@ -65,6 +82,8 @@ sections your ticket cites before writing code.
   tests `src/core/paths.ts`). `test/helpers/cli.ts` runs the CLI with captured streams (pass
   `transport` to script HTTP); `test/helpers/http.ts` fakes the transport; `test/helpers/auth.ts`
   builds fake sessions/JWTs, loads the auth fixtures and asserts secret-free output.
+  `test/auth/no-playwright-load.test.ts` spawns `test/helpers/playwright-probe.ts` to prove
+  `--help`, `version`, `schema` and `auth status` never load `playwright-core`.
   `test/fixtures/` holds recorded payloads with a provenance README. `test/live/` (behind
   `BS_LIVE=1`) is the only place that may touch the tenant.
 - `test/commands/<name>.test.ts` — hermetic command suites: seed a session in a temp `--root`

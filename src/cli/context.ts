@@ -3,6 +3,7 @@
  * flags, lazily resolved paths/config, and the one output seam (`emit`).
  */
 import type { Rung } from '../auth/ladder.js';
+import { silentRung } from '../auth/rungs/silent.js';
 import { loadConfig, type TenantConfig } from '../core/config.js';
 import { createHttp, type HttpClient, type Transport } from '../core/http/index.js';
 import {
@@ -69,8 +70,12 @@ export interface RunIO {
   stdoutIsTTY: boolean;
   stderrIsTTY: boolean;
   cwd: string;
+  /** Where prompts read their answer; defaults to process.stdin. */
+  stdin?: NodeJS.ReadableStream;
   /** Test injection only; defaults to global fetch. */
   transport?: Transport;
+  /** Test injection only; defaults to the silent rung (`ctx.rungs`). */
+  rungs?: Rung[];
 }
 
 export interface CliContext extends RunIO {
@@ -84,7 +89,11 @@ export interface CliContext extends RunIO {
   config(): TenantConfig;
   /** The HTTP client for this invocation (timeout, verbose log, injected transport); memoized. */
   http(): HttpClient;
-  /** Ladder rungs above rung 0, in climb order. Registered by the auth tickets; empty by default. */
+  stdin: NodeJS.ReadableStream;
+  /**
+   * Ladder rungs above rung 0, in climb order: the silent rung by default, so data commands go
+   * rung 0 → silent → exit 4. The full rung is only ever passed explicitly by `bs auth login`.
+   */
   rungs: Rung[];
   /** Human line to stderr. */
   log(message: string): void;
@@ -102,6 +111,7 @@ export function createContext(io: Partial<RunIO> = {}): CliContext {
     stdoutIsTTY: io.stdoutIsTTY ?? Boolean(process.stdout.isTTY),
     stderrIsTTY: io.stderrIsTTY ?? Boolean(process.stderr.isTTY),
     cwd: io.cwd ?? process.cwd(),
+    stdin: io.stdin ?? process.stdin,
     transport: io.transport,
   };
   let paths: BsPaths | undefined;
@@ -109,9 +119,10 @@ export function createContext(io: Partial<RunIO> = {}): CliContext {
   let http: HttpClient | undefined;
   const ctx: CliContext = {
     ...base,
+    stdin: base.stdin ?? process.stdin,
     globals: defaultGlobals(),
     markerId: newMarkerId(),
-    rungs: [],
+    rungs: io.rungs ?? [silentRung()],
     paths() {
       paths ??= resolvePaths({ root: ctx.globals.root, env: ctx.env, cwd: ctx.cwd });
       return paths;
