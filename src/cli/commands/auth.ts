@@ -2,23 +2,38 @@
  * `bs auth` (PRD 6.2): `status` (rung 0 only), `refresh` (the silent rung, then rung 0),
  * `login` (the ONLY command that climbs the full rung: it types a password and waits for a
  * human's number-match approval) and `logout` (the ONLY command that deletes credentials:
- * RepoBar anti-trapdoor). `doctor` arrives with bs-6cu.
+ * RepoBar anti-trapdoor) and `doctor` (a read-only diagnosis of the environment: never a window,
+ * never a mint; the Chromium download only behind `--install-browser` and a `y`).
  */
 import { existsSync, rmSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import type { Command } from 'commander';
 import { resolveCredentials, writeCredentialsFile } from '../../auth/credentials.js';
+import {
+  CHROMIUM_INSTALL_SIZE,
+  checkBrowser,
+  DEFAULT_CHANNEL,
+  type DoctorCheck,
+  type DoctorReport,
+  defaultDoctorDeps,
+  installHint,
+  loadPlaywright,
+  reportOf,
+  runDoctor,
+} from '../../auth/doctor.js';
 import { type ClimbResult, climb, HINT_LOGIN, profileExists } from '../../auth/ladder.js';
 import { type FullFailure, fullRung } from '../../auth/rungs/full.js';
 import { HINT_DOCTOR } from '../../auth/rungs/silent.js';
 import { deleteSession, type Session, writeSession } from '../../auth/session.js';
 import {
   AuthRequiredError,
+  type BsError,
   CancelledError,
   ConfigError,
   RetryableError,
   UsageError,
 } from '../../core/errors.js';
+import { colorize } from '../../core/output.js';
 import { type CliContext, emit } from '../context.js';
 
 export interface AuthStatus {
@@ -108,6 +123,63 @@ async function confirm(ctx: CliContext, question: string): Promise<boolean> {
   } finally {
     rl.close();
   }
+}
+
+const MARKS: Record<DoctorCheck['status'], [string, 'green' | 'yellow' | 'red']> = {
+  ok: ['\u2713', 'green'],
+  warn: ['!', 'yellow'],
+  fail: ['\u2717', 'red'],
+};
+
+function doctorHuman(ctx: CliContext, report: DoctorReport): string {
+  const width = Math.max(...report.checks.map((c) => c.name.length));
+  const lines: string[] = [];
+  for (const check of report.checks) {
+    const [mark, color] = MARKS[check.status];
+    lines.push(
+      `${colorize(mark, color, ctx.globals.color)} ${check.name.padEnd(width)}  ${check.detail}`,
+    );
+    if (check.hint !== undefined) lines.push(`${' '.repeat(width + 4)}${check.hint}`);
+  }
+  const failed = report.checks.filter((c) => !c.ok).length;
+  const warned = report.checks.filter((c) => c.status === 'warn').length;
+  const summary =
+    failed === 0
+      ? `all checks passed${warned === 0 ? '' : ` (${warned} warning${warned === 1 ? '' : 's'})`}`
+      : `${failed} check${failed === 1 ? '' : 's'} failed`;
+  lines.push('', summary);
+  return lines.join('\n');
+}
+
+function emitDoctor(ctx: CliContext, report: DoctorReport): void {
+  emit(ctx, {
+    value: report,
+    tsv: {
+      columns: ['name', 'status', 'ok', 'detail', 'hint'],
+      rows: report.checks.map((c) => ({
+        name: c.name,
+        status: c.status,
+        ok: c.ok,
+        detail: c.detail,
+        hint: c.hint ?? '',
+      })),
+    },
+    human: () => doctorHuman(ctx, report),
+    wrap: false,
+  });
+}
+
+/** The error a failed report becomes: only an unreachable tenant retries (8); the rest is config (10). */
+function doctorError(report: DoctorReport, tenantUnreachable: boolean): BsError {
+  const failed = report.checks.filter((c) => !c.ok);
+  const names = failed.map((c) => c.name).join(', ');
+  const message = `${failed.length} check${failed.length === 1 ? '' : 's'} failed: ${names}`;
+  const hint = failed.find((c) => c.hint !== undefined)?.hint;
+  const options = hint === undefined ? {} : { hint };
+  const onlyTenant = failed.every((c) => c.name === 'tenant');
+  return tenantUnreachable && onlyTenant
+    ? new RetryableError(message, options)
+    : new ConfigError(message, options);
 }
 
 export function register(program: Command, ctx: CliContext): void {
@@ -315,5 +387,76 @@ export function register(program: Command, ctx: CliContext): void {
             : rows.map((r) => `removed ${r.kind} ${r.path}`).join('\n'),
         wrap: false,
       });
+    });
+
+  auth
+    .command('doctor')
+    .description(
+      "Diagnose the environment without logging in: Node >= 22.12, the state root and its modes, session.json (cached facts only, no mint), profile/, playwright-core, the browser executable for BS_BROWSER_CHANNEL, and the tenant's anonymous GET /d2l/api/versions/ against BS_LP_VERSION / BS_LE_VERSION. Never opens a window. Exit 0 when nothing failed (warnings allowed), 10 on a failed check, 8 when only the tenant was unreachable.",
+    )
+    .option(
+      '--install-browser',
+      `when Chromium is missing, download it (${CHROMIUM_INSTALL_SIZE}) into playwright's cache after a y/N prompt on stderr (non-interactive or --no-input: exit 2 with the command to run)`,
+    )
+    .action(async (opts: { installBrowser?: boolean }) => {
+      const paths = ctx.paths();
+      const config = ctx.config();
+      const log = (line: string) => ctx.debug(line);
+      const deps = { ...defaultDoctorDeps(), ...ctx.doctor };
+      const run = await runDoctor({ paths, config, http: ctx.http(), env: ctx.env, log }, deps);
+      let report = run.report;
+      let usage: UsageError | null = null;
+      const browser = report.checks.find((c) => c.name === 'browser');
+      const channel = report.browserChannel;
+      if (opts.installBrowser && browser !== undefined && !browser.ok) {
+        const cliPath = deps.cliPath();
+        if (channel !== DEFAULT_CHANNEL) {
+          ctx.warn(
+            `--install-browser downloads playwright's Chromium, but BS_BROWSER_CHANNEL is "${channel}": install that browser instead`,
+          );
+        } else if (cliPath === null) {
+          ctx.warn(
+            'playwright-core/cli.js could not be found, so the download cannot be started from here',
+          );
+        } else if (ctx.globals.noInput) {
+          usage = new UsageError(
+            `the Chromium download (${CHROMIUM_INSTALL_SIZE}) needs a confirmation and cannot prompt (non-interactive or --no-input)`,
+            { hint: installHint(cliPath) },
+          );
+        } else if (
+          await confirm(
+            ctx,
+            `Download Chromium (${CHROMIUM_INSTALL_SIZE}) into playwright's cache? [y/N] `,
+          )
+        ) {
+          ctx.log(`running: node ${cliPath} install chromium`);
+          let code: number;
+          try {
+            code = await deps.install({
+              cliPath,
+              browser: 'chromium',
+              env: ctx.env,
+              stderr: ctx.stderr,
+            });
+          } catch (err) {
+            code = 1;
+            ctx.warn(`the installer could not be started: ${describe(err)}`);
+          }
+          if (code !== 0) ctx.warn(`the installer exited with code ${code}`);
+          // Re-check with a fresh import: playwright caches nothing about the executable, but the
+          // load may have been what failed before.
+          const load = await loadPlaywright(deps);
+          const again = checkBrowser({ config, env: ctx.env, load, deps });
+          report = reportOf(
+            { paths, config },
+            report.checks.map((c) => (c.name === 'browser' ? again : c)),
+          );
+        } else {
+          ctx.warn('install declined; the browser check stays failed');
+        }
+      }
+      emitDoctor(ctx, report);
+      if (usage !== null) throw usage;
+      if (!report.ok) throw doctorError(report, run.tenantUnreachable);
     });
 }

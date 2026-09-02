@@ -2,6 +2,7 @@
  * Per-invocation context handed to every command: streams, environment, resolved global
  * flags, lazily resolved paths/config, and the one output seam (`emit`).
  */
+import type { DoctorDeps } from '../auth/doctor.js';
 import type { Rung } from '../auth/ladder.js';
 import type { FullRungFactory } from '../auth/rungs/full.js';
 import { silentRung } from '../auth/rungs/silent.js';
@@ -82,6 +83,8 @@ export interface RunIO {
    * `src/auth/rungs/full.ts`). Never a rung in `rungs`: no other command may climb it.
    */
   fullRung?: FullRungFactory;
+  /** Test injection only: the probes `bs auth doctor` runs (defaults to the real environment). */
+  doctor?: Partial<DoctorDeps>;
 }
 
 export interface CliContext extends RunIO {
@@ -120,6 +123,7 @@ export function createContext(io: Partial<RunIO> = {}): CliContext {
     stdin: io.stdin ?? process.stdin,
     transport: io.transport,
     fullRung: io.fullRung,
+    doctor: io.doctor,
   };
   let paths: BsPaths | undefined;
   let config: TenantConfig | undefined;
