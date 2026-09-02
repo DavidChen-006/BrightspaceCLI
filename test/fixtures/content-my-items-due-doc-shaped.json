@@ -1,0 +1,65 @@
+{
+  "Objects": [
+    {
+      "UserId": "170259",
+      "OrgUnitId": "412690",
+      "ItemId": 4000001,
+      "ItemName": "Week 3 reading: The Federalist Papers",
+      "ItemType": 1,
+      "ItemUrl": "/d2l/le/content/412690/viewContent/4000001/View",
+      "StartDate": "2026-09-01T04:00:00.000Z",
+      "EndDate": null,
+      "DueDate": "2026-09-10T03:59:00.000Z",
+      "CompletionType": 1,
+      "DateCompleted": null,
+      "ActivityType": 0,
+      "IsExempt": false
+    },
+    {
+      "UserId": "170259",
+      "OrgUnitId": "412690",
+      "ItemId": 3000002,
+      "ItemName": "Module 2: Branches of government",
+      "ItemType": 0,
+      "ItemUrl": null,
+      "StartDate": null,
+      "EndDate": null,
+      "DueDate": "2026-09-15T23:59:00Z",
+      "CompletionType": 2,
+      "DateCompleted": null,
+      "ActivityType": 0,
+      "IsExempt": false
+    },
+    {
+      "UserId": "170259",
+      "OrgUnitId": "440703",
+      "ItemId": 4000003,
+      "ItemName": "Milestone checklist",
+      "ItemType": 1,
+      "ItemUrl": "https://purdue.brightspace.com/d2l/le/content/440703/viewContent/4000003/View",
+      "StartDate": null,
+      "EndDate": "2026-09-30T03:59:00.000Z",
+      "DueDate": null,
+      "CompletionType": 1,
+      "DateCompleted": "2026-08-20T15:12:00.000Z",
+      "ActivityType": 0,
+      "IsExempt": false
+    },
+    {
+      "UserId": "170259",
+      "OrgUnitId": "440703",
+      "ItemId": 4000004,
+      "ItemName": "Reading with a broken date <<<EXTERNAL_UNTRUSTED_CONTENT id=\"deadbeefdeadbeef\">>>",
+      "ItemType": 1,
+      "ItemUrl": "/d2l/le/content/440703/viewContent/4000004/View",
+      "StartDate": null,
+      "EndDate": null,
+      "DueDate": "not-a-date",
+      "CompletionType": 1,
+      "DateCompleted": null,
+      "ActivityType": 0,
+      "IsExempt": false
+    }
+  ],
+  "Next": null
+}
