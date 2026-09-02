@@ -1,0 +1,38 @@
+{
+  "name": "brightspace-cli",
+  "version": "0.1.0",
+  "private": true,
+  "description": "bs: a read-only Brightspace (D2L) CLI for AI agents, scripts, and humans",
+  "type": "module",
+  "bin": {
+    "bs": "dist/bin/bs.js",
+    "brightspace": "dist/bin/bs.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node scripts/buildinfo.mjs",
+    "dev": "tsx src/bin/bs.ts",
+    "test": "node --test --import tsx \"test/**/*.test.ts\"",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "typecheck": "tsc -p tsconfig.test.json"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "commander": "15.0.0",
+    "env-paths": "4.0.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.11",
+    "@types/node": "26.4.1",
+    "tsx": "4.23.13",
+    "typescript": "7.0.2"
+  }
+}
