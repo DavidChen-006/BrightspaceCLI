@@ -25,6 +25,12 @@ sections your ticket cites before writing code.
 - `src/cli/commands/quizzes.ts` — `bs quizzes list|get|attempts <ou> [<quizId>]` (bs-440): `list`
   walks `Next`; `get` maps 404 to a `bs quizzes list <ou>` hint; `attempts` calls `whoami` first for
   `?userId=` and rewrites a 403 with the learner-access caveat plus the quiz deep link.
+- `src/cli/commands/grades.ts` — `bs grades list|final <ou>` (bs-6mw). `list` fetches `grades/` and
+  `grades/values/myGradeValues/` concurrently and left-joins them on the grade object id (values
+  404 = "no grades yet" → every `myValue` null; objects failing while values answer costs only the
+  object fields with a warning; both failing reports the objects' error: 403 → 6, 404 → 5). `final`
+  emits the released final grade or the `released: false` shape with exit 0 (3 under
+  `--fail-empty`). `--plain` flattens `associatedTool`/`myValue` into one row per item.
 - `src/core/paths.ts` — the single layout decision (PRD 8.1). Resolution is pure;
   `ensureDirs()` creates 0700 dirs and is never called by `--help`, `version`, `schema`.
 - `src/core/config.ts` — tenant knobs (PRD 8.3): flags > `BS_*` env > `config.json` > defaults.
@@ -85,6 +91,11 @@ sections your ticket cites before writing code.
   `timeLimit` from `SubmissionTimeLimit`; rich text read from either `{Text:{Text,Html},IsDisplayed}`
   or flat `{Text,Html}`; `instructions`/`feedback` are text only so every free-text key is one
   `--wrap-untrusted` wraps).
+  `grades.ts`: `LeTenant` (the LE twin of `LpTenant`), the three gradebook routes (`listGradeObjects`
+  bare array; `listMyGradeValues` maps 404 → `[]`; `getMyFinalGrade` maps 404 → `null`), and the
+  pure parsers `gradeTypeOf()` (GRADEOBJ_T 1..9 incl. the tenant's category row, numeric
+  `GradeObjectTypeId` before the docs' `GradeType` string), `gradeValueOf()`, `gradeOf()`,
+  `joinGrades()` (objects keep their order, orphan values follow) and `finalGradeOf()`.
 - `src/schema/schema.ts` — `bs schema --json` from the live commander tree.
 - `src/buildinfo.ts` — version from `package.json`; commit/date from `dist/buildinfo.json`
   (written by `scripts/buildinfo.mjs` during `npm run build`; "unknown" in dev).

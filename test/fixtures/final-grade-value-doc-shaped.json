@@ -1,0 +1,16 @@
+{
+  "DisplayedGrade": "87.5 %",
+  "GradeObjectIdentifier": "1005",
+  "GradeObjectName": "Final Calculated Grade",
+  "GradeObjectType": 7,
+  "GradeObjectTypeName": "FinalCalculated",
+  "Comments": { "Text": "Strong finish.", "Html": "<p>Strong finish.</p>" },
+  "PrivateComments": { "Text": "", "Html": "" },
+  "LastModified": "2026-05-20T18:30:00.000Z",
+  "LastModifiedBy": "12345",
+  "ReleasedDate": "2026-05-20T18:30:00.000Z",
+  "PointsNumerator": 87.5,
+  "PointsDenominator": 100,
+  "WeightedDenominator": 100,
+  "WeightedNumerator": 87.5
+}
