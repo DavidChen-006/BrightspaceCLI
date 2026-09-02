@@ -17,7 +17,8 @@ export interface CliResult {
 
 /**
  * Runs the CLI in-process with captured streams and a fully injected environment.
- * Nothing from the developer's shell leaks in unless the test passes it explicitly.
+ * Nothing from the developer's shell leaks in unless the test passes it explicitly, and no
+ * ladder rung above rung 0 is registered unless the test passes `rungs` (never a real browser).
  */
 export async function runCli(argv: string[], io: Partial<RunIO> = {}): Promise<CliResult> {
   const stdout = new Sink();
@@ -29,6 +30,7 @@ export async function runCli(argv: string[], io: Partial<RunIO> = {}): Promise<C
     stdinIsTTY: false,
     stdoutIsTTY: false,
     stderrIsTTY: false,
+    rungs: [],
     ...io,
   });
   return { code, stdout: stdout.text, stderr: stderr.text };

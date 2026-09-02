@@ -373,9 +373,9 @@ function cliContext(root: string, steps: Step[], rungs: Rung[] = []) {
     stdinIsTTY: false,
     stdoutIsTTY: false,
     stderrIsTTY: false,
+    rungs,
   });
   ctx.globals = { ...ctx.globals, root, verbose: true };
-  ctx.rungs.push(...rungs);
   return { ctx, ft, stderr };
 }
 
