@@ -10,7 +10,8 @@ sections your ticket cites before writing code.
 - `src/cli/program.ts` — commander root, global flags, env defaults, validation, exit-code
   mapping; `run(argv, io)` returns an exit code (tests call it in-process).
 - `src/cli/context.ts` — per-invocation `CliContext` (streams, env, resolved globals, lazy
-  `paths()`/`config()`) and `emit()`, the one output seam for json/plain/human.
+  `paths()`/`config()`/`http()`, the `rungs` list the auth tickets register) and `emit()`, the
+  one output seam for json/plain/human. Tests inject `transport` through `RunIO`.
 - `src/cli/options.ts` — global flag definitions (PRD 6.1) and the flag type registry.
 - `src/cli/commands/<name>.ts` — one file per resource exporting `register(program, ctx)`;
   add it to the list in `src/cli/commands/index.ts`.
@@ -26,13 +27,27 @@ sections your ticket cites before writing code.
   `toError()` → BsError + exit code), `paginate.ts` (`pagedResultSet`, `objectListPage`,
   `pageNumbered`, `collect`), `pool.ts` (`boundedPool`), `url.ts` (`d2lUrl`). Commands never call
   `fetch` directly; tests inject a fake transport (`test/helpers/http.ts`).
-- `src/core/dates.ts` — `toD2lDateTime()` (UTCDateTime with milliseconds) and `isoSeconds()`
-  (whole-second UTC or null).
+- `src/core/dates.ts` — `toD2lDateTime()` (UTCDateTime with milliseconds), `isoSeconds()`
+  (whole-second UTC or null) and `isoAtMs()` (epoch ms to whole-second UTC).
+- `src/core/atomic.ts` — `writeJsonAtomic()` (same-dir temp + rename, chmod 0600) and
+  `readJsonFile()` (missing/corrupt → undefined). Directories come from `paths.ensureDirs()`.
+- `src/auth/` — the session ladder (PRD 7, 8.1–8.2). `session.ts`: the `session.json` contract,
+  `readSession()` (corrupt → null, never throws), `writeSession()` (atomic 0600 in 0700 dirs),
+  `deleteSession()` (only `bs auth logout` may call it), `buildCookieHeader()` (fixed order),
+  `jwtExpiry()`/`jwtIsFresh()` (60 s skew, 3600 s fallback). `mint.ts`: `mintJwt()`, the one
+  permitted mutation (`POST /d2l/lp/auth/oauth2/token`), classified marker first then status.
+  `ladder.ts`: the `Rung` seam (`kind: 'silent' | 'full'`, `attempt({paths, config, log})`),
+  `climb()` (rung 0 → rungs in order, `full` only with `allowFull`; never throws, never deletes
+  state, always writes `cache/status.json`), `authorizedHttp(ctx)` (Bearer-attaching client or
+  `AuthRequiredError`/`RetryableError`) and `retryOnceOnSessionExpired()` for data commands.
+  Browser rungs import `playwright-core` lazily and live in their own files.
 - `src/schema/schema.ts` — `bs schema --json` from the live commander tree.
 - `src/buildinfo.ts` — version from `package.json`; commit/date from `dist/buildinfo.json`
   (written by `scripts/buildinfo.mjs` during `npm run build`; "unknown" in dev).
 - `test/**/*.test.ts` — hermetic `node:test` suites mirroring `src/` (`test/core/paths.test.ts`
-  tests `src/core/paths.ts`). `test/helpers/cli.ts` runs the CLI with captured streams.
+  tests `src/core/paths.ts`). `test/helpers/cli.ts` runs the CLI with captured streams (pass
+  `transport` to script HTTP); `test/helpers/http.ts` fakes the transport; `test/helpers/auth.ts`
+  builds fake sessions/JWTs, loads the auth fixtures and asserts secret-free output.
   `test/fixtures/` holds recorded payloads with a provenance README. `test/live/` (behind
   `BS_LIVE=1`) is the only place that may touch the tenant.
 - `reference/` — vendored reference projects (read-only, excluded from lint).
