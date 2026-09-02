@@ -1,0 +1,48 @@
+[
+  {
+    "Structure": [],
+    "ModuleStartDate": null,
+    "ModuleEndDate": null,
+    "ModuleDueDate": "2026-09-05T03:59:00.000Z",
+    "IsHidden": false,
+    "IsLocked": false,
+    "Id": 3000002,
+    "Title": "Lectures",
+    "ShortTitle": "Lec",
+    "Color": null,
+    "Type": 0,
+    "Description": {
+      "Text": "Weekly lecture material.",
+      "Html": "<p>Weekly lecture material.</p>"
+    },
+    "ParentModuleId": 3000001,
+    "Duration": null,
+    "LastModifiedDate": "2026-08-20T15:04:05.000Z"
+  },
+  {
+    "TopicType": 3,
+    "Url": "/d2l/lms/quizzing/user/quiz_summary.d2l?qi=790340&ou=412690",
+    "StartDate": "2026-08-24T04:00:00Z",
+    "EndDate": "2026-12-20T04:59:00.000Z",
+    "DueDate": "2026-08-30T03:59:00Z",
+    "IsHidden": false,
+    "IsLocked": false,
+    "IsBroken": false,
+    "OpenAsExternalResource": null,
+    "Id": 4000003,
+    "Title": "Welcome Quiz",
+    "ShortTitle": null,
+    "Type": 1,
+    "Description": null,
+    "ParentModuleId": 3000001,
+    "ActivityId": "https://purdue.brightspace.com/d2l/api/le/1.96/412690/quizzes/790340",
+    "Duration": null,
+    "IsExempt": false,
+    "ToolId": 6,
+    "ToolItemId": 790340,
+    "ActivityType": 4,
+    "GradeItemId": 55001,
+    "LastModifiedDate": "2026-08-18T12:00:00.000Z",
+    "AssociatedGradeItemIds": [55001]
+  }
+]

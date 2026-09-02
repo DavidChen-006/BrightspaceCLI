@@ -29,6 +29,13 @@ sections your ticket cites before writing code.
   only after a successful login. The MFA relay is a plain stderr line via `ctx.log`.
 - `src/cli/commands/whoami.ts`, `src/cli/commands/courses.ts` — `bs whoami`, `bs courses list|get`
   (bs-0am): thin actions that parse flags, call `src/d2l/` through `withData`, shape, emit.
+- `src/cli/commands/content.ts` — `bs content toc|get|module|download <ou> [<id>]` (bs-kzf): `toc` is one
+  GET emitting the module tree (`--flat`: one Topic row per topic with its module `path`; `--plain` is
+  always the flat rows); `get` adds `dueDate`/`description` and maps a 400 (a module id) to exit 2;
+  `module` lists one module's children; `download` streams `topics/(id)/file` through
+  `requestStream` to `--out <dir|file>` (`.part` then rename) or `--out -`/`--stdout`, names the file
+  from `Content-Disposition`, else the topic's file `Url`, else its title, and maps the 400 "not a
+  file" to exit 2 with the topic type and `url`. 404 → exit 5 with a `content toc --flat` hint.
 - `src/cli/commands/quizzes.ts` — `bs quizzes list|get|attempts <ou> [<quizId>]` (bs-440): `list`
   walks `Next`; `get` maps 404 to a `bs quizzes list <ou>` hint; `attempts` calls `whoami` first for
   `?userId=` and rewrites a 403 with the learner-access caveat plus the quiz deep link.
@@ -133,6 +140,13 @@ sections your ticket cites before writing code.
   parsers `courseOf()`/`courseDetailOf()` onto the PRD 6.3 Course shape (every value read, only
   `url` computed, dates through `isoSeconds`). Route helpers take `(http, cfg, ...)` where `cfg`
   is the tenant config (versions from `lpVersion`/`leVersion`, never hard-coded).
+  `content.ts`: `contentTocUrl()`/`contentTopicUrl()`/`contentTopicFileUrl()`/`contentModuleStructureUrl()`,
+  `getToc()`, `getTopic()` (400 → UsageError), `getModuleStructure()`, `streamTopicFile()` (a
+  `StreamOutcome` for the command to classify), and the pure parsers `tocTree()`/`flattenToc()` (PRD 6.3
+  Topic shape with `kind: 'content'`, `path`, `depth`; the server `Url` absolutised, never templated;
+  CONTENTACTIVITYTYPE_T / CONTENT_TOPIC_T mapped to names with the numeric id kept),
+  `topicDetailOf()`, `moduleChildOf()`/`moduleChildren()`, plus the download-name helpers
+  `filenameFromContentDisposition()` (RFC 6266/5987), `safeFileName()` and `fileNameFromTopicUrl()`.
   `quizzes.ts`: `LeTenant`, `quizzesUrl()`/`quizItemUrl()`/`quizAttemptsUrl()`, `listQuizzes()` and
   `listAttempts()` (async iterables over `objectListPage`, which rejects the dropbox bare-array
   shape), `getQuiz()`, and the pure parsers `quizOf()`/`quizDetailOf()`/`attemptOf()` onto the PRD

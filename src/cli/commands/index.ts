@@ -7,6 +7,7 @@ import type { CliContext } from '../context.js';
 import { register as registerAnnouncements } from './announcements.js';
 import { register as registerAssignments } from './assignments.js';
 import { register as registerAuth } from './auth.js';
+import { register as registerContent } from './content.js';
 import { register as registerCourses } from './courses.js';
 import { register as registerGrades } from './grades.js';
 import { register as registerQuizzes } from './quizzes.js';
@@ -20,6 +21,7 @@ export const commands: readonly Registrar[] = [
   registerAssignments,
   registerAnnouncements,
   registerAuth,
+  registerContent,
   registerCourses,
   registerQuizzes,
   registerGrades,

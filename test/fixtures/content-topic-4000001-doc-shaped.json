@@ -1,0 +1,29 @@
+{
+  "TopicType": 1,
+  "Url": "/content/enforced/412690-CS180/lecture01.pdf",
+  "StartDate": "2026-08-24T04:00:00.000Z",
+  "EndDate": null,
+  "DueDate": "2026-09-15T23:59:00Z",
+  "IsHidden": false,
+  "IsLocked": false,
+  "IsBroken": false,
+  "OpenAsExternalResource": false,
+  "Id": 4000001,
+  "Title": "Lecture 1 slides",
+  "ShortTitle": "L1",
+  "Type": 1,
+  "Description": {
+    "Text": "Slides for lecture 1. Read before Friday.",
+    "Html": "<p>Slides for lecture 1. <strong>Read before Friday.</strong></p>"
+  },
+  "ParentModuleId": 3000002,
+  "ActivityId": null,
+  "Duration": 30,
+  "IsExempt": false,
+  "ToolId": null,
+  "ToolItemId": null,
+  "ActivityType": 1,
+  "GradeItemId": null,
+  "LastModifiedDate": "2026-08-20T15:04:05.000Z",
+  "AssociatedGradeItemIds": []
+}
