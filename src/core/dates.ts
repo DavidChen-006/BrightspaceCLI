@@ -30,3 +30,8 @@ export function isoSeconds(raw: unknown): string | null {
   const at = new Date(raw);
   return Number.isNaN(at.getTime()) ? null : `${at.toISOString().slice(0, 19)}Z`;
 }
+
+/** Whole-second UTC (`yyyy-MM-ddTHH:mm:ssZ`) for an epoch-millisecond instant. */
+export function isoAtMs(ms: number): string {
+  return `${new Date(ms).toISOString().slice(0, 19)}Z`;
+}

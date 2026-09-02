@@ -2,7 +2,9 @@
  * Per-invocation context handed to every command: streams, environment, resolved global
  * flags, lazily resolved paths/config, and the one output seam (`emit`).
  */
+import type { Rung } from '../auth/ladder.js';
 import { loadConfig, type TenantConfig } from '../core/config.js';
+import { createHttp, type HttpClient, type Transport } from '../core/http/index.js';
 import {
   type ColorMode,
   type Column,
@@ -67,6 +69,8 @@ export interface RunIO {
   stdoutIsTTY: boolean;
   stderrIsTTY: boolean;
   cwd: string;
+  /** Test injection only; defaults to global fetch. */
+  transport?: Transport;
 }
 
 export interface CliContext extends RunIO {
@@ -78,6 +82,10 @@ export interface CliContext extends RunIO {
   paths(): BsPaths;
   /** Effective tenant config (flags > env > config.json > defaults); memoized. */
   config(): TenantConfig;
+  /** The HTTP client for this invocation (timeout, verbose log, injected transport); memoized. */
+  http(): HttpClient;
+  /** Ladder rungs above rung 0, in climb order. Registered by the auth tickets; empty by default. */
+  rungs: Rung[];
   /** Human line to stderr. */
   log(message: string): void;
   warn(message: string): void;
@@ -94,13 +102,16 @@ export function createContext(io: Partial<RunIO> = {}): CliContext {
     stdoutIsTTY: io.stdoutIsTTY ?? Boolean(process.stdout.isTTY),
     stderrIsTTY: io.stderrIsTTY ?? Boolean(process.stderr.isTTY),
     cwd: io.cwd ?? process.cwd(),
+    transport: io.transport,
   };
   let paths: BsPaths | undefined;
   let config: TenantConfig | undefined;
+  let http: HttpClient | undefined;
   const ctx: CliContext = {
     ...base,
     globals: defaultGlobals(),
     markerId: newMarkerId(),
+    rungs: [],
     paths() {
       paths ??= resolvePaths({ root: ctx.globals.root, env: ctx.env, cwd: ctx.cwd });
       return paths;
@@ -113,6 +124,15 @@ export function createContext(io: Partial<RunIO> = {}): CliContext {
         warn: (m) => ctx.warn(m),
       });
       return config;
+    },
+    http() {
+      http ??= createHttp({
+        transport: ctx.transport,
+        timeoutMs: ctx.globals.timeout * 1000,
+        verbose: ctx.globals.verbose,
+        log: (line) => ctx.debug(line),
+      });
+      return http;
     },
     log(message) {
       ctx.stderr.write(`${message}\n`);
