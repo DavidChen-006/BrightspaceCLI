@@ -2,13 +2,12 @@
  * `bs assignments list|get|submissions|download` (PRD 6.2, 6.3). Every verb goes through
  * `withData` (ladder, one re-mint) and the `src/d2l/assignments.ts` routes; the shapes are the
  * PRD Item (`kind: 'assignment'`) and Submission. `download` streams one file through
- * `requestStream` into `--out` (a directory, a file path, or `-` for raw bytes on stdout).
+ * `requestStream` and the shared `src/cli/download.ts` plumbing into `--out` (a directory, a
+ * file path, or `-` for raw bytes on stdout).
  */
-import { mkdir, open, unlink } from 'node:fs/promises';
-import path from 'node:path';
 import { type Command, InvalidArgumentError, Option } from 'commander';
 import { BsError, NotFoundError, UsageError } from '../../core/errors.js';
-import { classify, type HttpStream, toError } from '../../core/http/index.js';
+import { classify, toError } from '../../core/http/index.js';
 import { type Column, type Row, Table } from '../../core/output.js';
 import {
   ASSIGNMENT_COLUMNS,
@@ -17,17 +16,22 @@ import {
   assignmentDetailOf,
   assignmentOf,
   attachmentUrl,
-  contentDispositionFilename,
   getFolder,
   listFolders,
   listMySubmissions,
   type Submission,
-  safeFileName,
   submissionFileUrl,
   submissionOf,
 } from '../../d2l/assignments.js';
 import { type CliContext, emit } from '../context.js';
 import { emitList, emitRaw, listEnvelope, withData } from '../data.js';
+import {
+  downloadTo,
+  filenameFromContentDisposition,
+  isStdoutTarget,
+  resolveOutTarget,
+  safeFileName,
+} from '../download.js';
 import { parsePositiveInt, typed } from '../options.js';
 import { parseOrgUnit } from './courses.js';
 
@@ -171,78 +175,6 @@ interface DownloadResult {
   contentType: string | null;
 }
 
-/** process.stdout and the test sinks both accept bytes; the Sink type only promises strings. */
-interface ByteSink {
-  write(chunk: Uint8Array): unknown;
-}
-
-/** Where the file lands: `--out` as a directory (existing or trailing slash), a file path, or cwd. */
-async function resolveTarget(
-  ctx: CliContext,
-  out: string | undefined,
-  name: string,
-): Promise<string> {
-  if (out === undefined) return path.join(ctx.cwd, name);
-  const resolved = path.resolve(ctx.cwd, out);
-  const wantsDir = /[\\/]$/.test(out);
-  let isDir = wantsDir;
-  if (!wantsDir) {
-    try {
-      const handle = await open(resolved, 'r');
-      isDir = (await handle.stat()).isDirectory();
-      await handle.close();
-    } catch {
-      isDir = false;
-    }
-  }
-  if (isDir) {
-    await mkdir(resolved, { recursive: true });
-    return path.join(resolved, name);
-  }
-  await mkdir(path.dirname(resolved), { recursive: true });
-  return resolved;
-}
-
-async function writeStream(
-  body: ReadableStream<Uint8Array>,
-  write: (chunk: Uint8Array) => Promise<void> | void,
-): Promise<number> {
-  const reader = body.getReader();
-  let bytes = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) return bytes;
-    await write(value);
-    bytes += value.byteLength;
-  }
-}
-
-async function saveTo(target: string, stream: HttpStream, force: boolean): Promise<number> {
-  let handle: Awaited<ReturnType<typeof open>>;
-  try {
-    handle = await open(target, force ? 'w' : 'wx');
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'EEXIST') {
-      await stream.body.cancel().catch(() => {});
-      throw new UsageError(`refusing to overwrite ${target}`, {
-        hint: 'Pass --force to overwrite, or --out <path> to write somewhere else.',
-      });
-    }
-    throw err;
-  }
-  try {
-    return await writeStream(stream.body, async (chunk) => {
-      await handle.write(chunk);
-    });
-  } catch (err) {
-    await handle.close().catch(() => {});
-    await unlink(target).catch(() => {});
-    throw err;
-  } finally {
-    await handle.close().catch(() => {});
-  }
-}
-
 // ---------------------------------------------------------------------------------------------
 // Commands
 // ---------------------------------------------------------------------------------------------
@@ -382,7 +314,7 @@ export function register(program: Command, ctx: CliContext): void {
     )
     .option('--force', 'overwrite an existing file')
     .action(async (ou: number, folderId: number, fileId: number, opts: DownloadOptions) => {
-      const toStdout = opts.out === '-';
+      const toStdout = isStdoutTarget(opts.out);
       if (toStdout && ctx.globals.outputMode !== 'human') {
         throw new UsageError(
           '--out - writes the file bytes to stdout and cannot be combined with --json or --plain',
@@ -407,20 +339,20 @@ export function register(program: Command, ctx: CliContext): void {
         }
         const { stream } = outcome;
         const fileName = safeFileName(
-          contentDispositionFilename(stream.headers['content-disposition']),
+          filenameFromContentDisposition(stream.headers['content-disposition']),
           `file-${fileId}`,
         );
         const contentType = stream.headers['content-type']?.split(';')[0]?.trim() || null;
-        if (toStdout) {
-          const sink = ctx.stdout as unknown as ByteSink;
-          const bytes = await writeStream(stream.body, (chunk) => {
-            sink.write(chunk);
-          });
-          return { fileId, submissionId, fileName, path: '-', bytes, contentType };
-        }
-        const target = await resolveTarget(ctx, opts.out, fileName);
-        const bytes = await saveTo(target, stream, opts.force === true);
-        return { fileId, submissionId, fileName, path: target, bytes, contentType };
+        const target = await resolveOutTarget(ctx, opts.out, fileName);
+        const bytes = await downloadTo(ctx, target, stream.body, { force: opts.force === true });
+        return {
+          fileId,
+          submissionId,
+          fileName,
+          path: target.kind === 'stdout' ? '-' : target.path,
+          bytes,
+          contentType,
+        };
       });
       if (toStdout) {
         ctx.debug(`wrote ${result.bytes} bytes (${result.fileName}) to stdout`);

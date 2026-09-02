@@ -1,14 +1,12 @@
 /**
  * `bs announcements list|get|download` (PRD 6.2, 6.3). All three go through `withData`
  * (ladder, one re-mint) and the `src/d2l/announcements.ts` routes. `get` is a filter of the
- * list (D2L exposes no single-item news route); `download` streams attachments to disk.
+ * list (D2L exposes no single-item news route); `download` streams attachments to disk through
+ * the shared `src/cli/download.ts` plumbing (`.part` + rename, `--force` to overwrite).
  */
-import { createWriteStream } from 'node:fs';
-import { mkdir, rename, rm } from 'node:fs/promises';
 import path from 'node:path';
-import { pipeline } from 'node:stream/promises';
 import { type Command, InvalidArgumentError, Option } from 'commander';
-import { BsError, NotFoundError, RetryableError } from '../../core/errors.js';
+import { BsError, NotFoundError } from '../../core/errors.js';
 import { displayPath } from '../../core/http/index.js';
 import { Table } from '../../core/output.js';
 import {
@@ -21,6 +19,7 @@ import {
 } from '../../d2l/announcements.js';
 import { type CliContext, emit } from '../context.js';
 import { emitList, emitRaw, listEnvelope, withData } from '../data.js';
+import { resolveOutDir, safeFileName, writeStreamToFile } from '../download.js';
 import { parsePositiveInt, typed } from '../options.js';
 import { parseOrgUnit } from './courses.js';
 
@@ -82,32 +81,8 @@ export function parseFileId(value: string): number {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Download helpers (exported for tests; candidates for a shared module once a sibling needs them)
+// Download helpers
 // ---------------------------------------------------------------------------------------------
-
-const MAX_NAME_LENGTH = 200;
-
-/**
- * A tenant-supplied file name reduced to something safe to create under `--out`: the last
- * path segment only, control characters and leading dots/spaces removed, length capped
- * (extension kept), `fallback` when nothing is left.
- */
-export function safeFileName(name: string | null, fallback: string): string {
-  const base = (name ?? '').split(/[\\/]/).pop() ?? '';
-  let out = [...base]
-    .filter((ch) => {
-      const code = ch.codePointAt(0) ?? 0;
-      return code >= 0x20 && code !== 0x7f;
-    })
-    .join('')
-    .replace(/^[.\s]+/, '')
-    .trim();
-  if (out.length > MAX_NAME_LENGTH) {
-    const ext = path.extname(out).slice(0, 20);
-    out = `${out.slice(0, MAX_NAME_LENGTH - ext.length)}${ext}`;
-  }
-  return out === '' ? fallback : out;
-}
 
 /** Keeps names unique within one run: a repeat becomes `<stem>-<fileId><ext>`. */
 function uniqueName(name: string, fileId: number, used: Set<string>): string {
@@ -124,32 +99,6 @@ function uniqueName(name: string, fileId: number, used: Set<string>): string {
   }
   used.add(candidate);
   return candidate;
-}
-
-/**
- * Streams a body into `file` via a same-directory `.part` temp file and a rename, so an
- * interrupted download never leaves a truncated file under the final name. Returns the bytes.
- */
-export async function writeStreamToFile(
-  body: ReadableStream<Uint8Array>,
-  file: string,
-): Promise<number> {
-  const temp = `${file}.part`;
-  let bytes = 0;
-  async function* counted(): AsyncGenerator<Uint8Array> {
-    for await (const chunk of body) {
-      bytes += chunk.byteLength;
-      yield chunk;
-    }
-  }
-  try {
-    await pipeline(counted(), createWriteStream(temp));
-    await rename(temp, file);
-  } catch (err) {
-    await rm(temp, { force: true });
-    throw err;
-  }
-  return bytes;
 }
 
 export interface DownloadRow {
@@ -212,6 +161,7 @@ interface ListOptions {
 
 interface DownloadOptions {
   out: string;
+  force?: boolean;
 }
 
 function notFound(ou: number, newsId: number): NotFoundError {
@@ -340,10 +290,10 @@ export function register(program: Command, ctx: CliContext): void {
         'string',
       ),
     )
+    .option('--force', 'overwrite existing files')
     .action(
       async (ou: number, newsId: number, fileId: number | undefined, opts: DownloadOptions) => {
         const startedAt = Date.now();
-        const outDir = path.resolve(opts.out);
         const rows = await withData(ctx, async (http, cfg) => {
           const { announcement } = pickAnnouncement(
             ctx,
@@ -365,7 +315,7 @@ export function register(program: Command, ctx: CliContext): void {
             ctx.warn(`announcement ${newsId} has no attachments`);
             return [] as DownloadRow[];
           }
-          await mkdir(outDir, { recursive: true });
+          const outDir = await resolveOutDir(ctx, opts.out);
           const used = new Set<string>();
           const written: DownloadRow[] = [];
           for (const target of targets) {
@@ -377,17 +327,10 @@ export function register(program: Command, ctx: CliContext): void {
             const file = path.join(outDir, name);
             const stream = await streamAttachment(http, cfg, ou, newsId, target.fileId);
             ctx.debug(`download: ${displayPath(stream.url)} -> ${file}`);
-            let bytes: number;
-            try {
-              bytes = await writeStreamToFile(stream.body, file);
-            } catch (err) {
-              if (err instanceof BsError) throw err;
-              const reason = err instanceof Error ? err.message : String(err);
-              throw new RetryableError(
-                `GET ${displayPath(stream.url)}: download interrupted: ${reason}`,
-                { cause: err },
-              );
-            }
+            const bytes = await writeStreamToFile(stream.body, file, {
+              force: opts.force === true,
+              label: `GET ${displayPath(stream.url)}`,
+            });
             written.push({ fileId: target.fileId, fileName: target.fileName, path: file, bytes });
           }
           return written;

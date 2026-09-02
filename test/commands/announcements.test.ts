@@ -676,9 +676,9 @@ test('announcements download: two attachments, both fetched in order; --plain an
     const human = await news(
       root,
       [jsonStep(HONORS), fileStep('first'), fileStep('second!')],
-      ['download', '440703', '1907220', '--out', out],
+      ['download', '440703', '1907220', '--out', out, '--force'],
     );
-    assert.equal(human.code, 0, human.stderr);
+    assert.equal(human.code, 0, human.stderr, 'the same names again: --force replaces them');
     assert.ok(human.stdout.includes('Spring_26AbstractBook.pdf'));
     assert.ok(human.stdout.includes('7 bytes'), human.stdout);
   } finally {
@@ -748,6 +748,45 @@ test('announcements download: unknown newsId → exit 5; no attachments → empt
       ['download', '412690', '1654367', '--out', out, '--json', '--fail-empty'],
     );
     assert.equal(failEmpty.code, EXIT_CODES.empty_results);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(out, { recursive: true, force: true });
+  }
+});
+
+test('announcements download never overwrites without --force (exit 2); --force replaces the file', async () => {
+  const { root } = seeded();
+  const out = outDir();
+  const target = path.join(out, 'How to Modify Brightspace Course Notifications.pdf');
+  try {
+    const first = await news(
+      root,
+      [jsonStep(CIVICS), fileStep('first bytes')],
+      ['download', '412690', '1386315', '--out', out, '--json'],
+    );
+    assert.equal(first.code, 0, first.stderr);
+    assert.equal(readFileSync(target, 'utf8'), 'first bytes');
+
+    const refused = await news(
+      root,
+      [jsonStep(CIVICS), fileStep('second bytes')],
+      ['download', '412690', '1386315', '--out', out, '--json'],
+    );
+    assert.equal(refused.code, EXIT_CODES.usage);
+    assert.equal(refused.stdout, '');
+    assert.match(refused.stderr, /refusing to overwrite/);
+    assert.match(refused.stderr, /--force/);
+    assert.equal(readFileSync(target, 'utf8'), 'first bytes', 'the existing file is untouched');
+    assert.deepEqual(readdirSync(out), [path.basename(target)], 'no .part left behind');
+
+    const forced = await news(
+      root,
+      [jsonStep(CIVICS), fileStep('second bytes')],
+      ['download', '412690', '1386315', '--out', out, '--json', '--force'],
+    );
+    assert.equal(forced.code, 0, forced.stderr);
+    assert.equal(readFileSync(target, 'utf8'), 'second bytes');
+    assert.equal(parseJson<ListOut<DownloadRow>>(forced.stdout).items[0]?.bytes, 12);
   } finally {
     rmSync(root, { recursive: true, force: true });
     rmSync(out, { recursive: true, force: true });

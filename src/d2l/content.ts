@@ -626,47 +626,8 @@ export function moduleChildren(
 }
 
 // ---------------------------------------------------------------------------------------------
-// Download names (A-19: Content-Disposition, else the topic)
+// Download names (A-19: the topic's file Url; Content-Disposition is parsed in src/cli/download.ts)
 // ---------------------------------------------------------------------------------------------
-
-/** RFC 6266: `filename*=charset''pct-encoded` wins over `filename="..."` / `filename=token`. */
-export function filenameFromContentDisposition(header: string | undefined): string | null {
-  if (header === undefined || header === '') return null;
-  const extended = /filename\*\s*=\s*(?:[\w-]+)?'[^']*'([^;]+)/i.exec(header);
-  if (extended?.[1] !== undefined) {
-    try {
-      const decoded = decodeURIComponent(extended[1].trim().replace(/^"|"$/g, ''));
-      if (decoded !== '') return decoded;
-    } catch {
-      // Malformed percent-encoding: fall through to the plain parameter, then null.
-    }
-  }
-  const plain = /filename\s*=\s*(?:"([^"]*)"|([^;]+))/i.exec(header);
-  if (plain === null) return null;
-  const name = (plain[1] ?? plain[2] ?? '').trim();
-  return name === '' ? null : name;
-}
-
-const MAX_FILENAME_LENGTH = 200;
-
-/**
- * A single path component safe on every platform: basename only, no control or reserved
- * characters, no leading dots (hidden files) or surrounding whitespace, bounded length with
- * the extension kept. Empty results fall back to `fallback`.
- */
-export function safeFileName(name: string, fallback: string): string {
-  const base = name.split(/[\\/]/).pop() ?? '';
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: control characters are what we strip
-  let cleaned = base.replace(/[\x00-\x1f\x7f<>:"|?*]/g, '').trim();
-  cleaned = cleaned.replace(/^[. ]+/, '').replace(/[. ]+$/, '');
-  if (cleaned === '') return fallback;
-  if (cleaned.length > MAX_FILENAME_LENGTH) {
-    const dot = cleaned.lastIndexOf('.');
-    const ext = dot > 0 && cleaned.length - dot <= 16 ? cleaned.slice(dot) : '';
-    cleaned = `${cleaned.slice(0, MAX_FILENAME_LENGTH - ext.length)}${ext}`;
-  }
-  return cleaned;
-}
 
 /** The basename of a file topic's content-space `Url` (`.../lecture01.pdf`), when it has one. */
 export function fileNameFromTopicUrl(topic: TopicDetail): string | null {

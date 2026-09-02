@@ -20,6 +20,17 @@ sections your ticket cites before writing code.
   no data request; never opens a browser), `listEnvelope()`/`emitList()` (PRD 6.3 `{items, count,
   fetchedAt}` plus `--fail-empty` → exit 3 after the output is written) and `emitRaw()` (`--raw`:
   the payload as decoded, `--select` ignored, `--wrap-untrusted` still applied).
+- `src/cli/download.ts` — what every `download` verb shares (bs-rst): `filenameFromContentDisposition()`
+  (RFC 6266/5987 `filename*` first, then quoted, then bare), `safeFileName()` (one path component,
+  control and `<>:"|?*` characters stripped, no leading dots, 255-byte cap keeping the extension,
+  fallback), `resolveOutTarget(ctx, out, defaultName)` (`-` → stdout; omitted → `<cwd>/<name>`;
+  trailing slash or an existing directory → the file inside it; anything else the exact file path;
+  directories created on demand), `resolveOutDir()`, `writeStreamToFile()` (same-directory `.part` +
+  rename, never a partial file under the final name; an existing file is refused without `--force`
+  as a `UsageError` exit 2 naming `--force`; a body failing mid-stream is `RetryableError` exit 8; a
+  filesystem failure is exit 1), `writeStreamToSink()` (bytes to `ctx.stdout`, honouring `drain`)
+  and `downloadTo()` dispatching on the target. `Sink` in `src/core/output.ts` accepts
+  `string | Uint8Array`, so no command casts a byte sink.
 - `src/cli/commands/auth.ts` — `bs auth status|refresh|login|logout`. `login` is the ONLY
   command that climbs the full rung: it resolves credentials first (so a non-interactive run
   with nothing to type is exit 4 before any browser), builds the full rung inside the action
@@ -33,9 +44,10 @@ sections your ticket cites before writing code.
   GET emitting the module tree (`--flat`: one Topic row per topic with its module `path`; `--plain` is
   always the flat rows); `get` adds `dueDate`/`description` and maps a 400 (a module id) to exit 2;
   `module` lists one module's children; `download` streams `topics/(id)/file` through
-  `requestStream` to `--out <dir|file>` (`.part` then rename) or `--out -`/`--stdout`, names the file
-  from `Content-Disposition`, else the topic's file `Url`, else its title, and maps the 400 "not a
-  file" to exit 2 with the topic type and `url`. 404 → exit 5 with a `content toc --flat` hint.
+  `requestStream` and `src/cli/download.ts` to `--out <dir|file>` (`.part` then rename; parents
+  created on demand; an existing file is exit 2 without `--force`) or `--out -`/`--stdout`, names
+  the file from `Content-Disposition`, else the topic's file `Url`, else its title, and maps the 400
+  "not a file" to exit 2 with the topic type and `url`. 404 → exit 5 with a `content toc --flat` hint.
 - `src/cli/commands/quizzes.ts` — `bs quizzes list|get|attempts <ou> [<quizId>]` (bs-440): `list`
   walks `Next`; `get` maps 404 to a `bs quizzes list <ou>` hint; `attempts` calls `whoami` first for
   `?userId=` and rewrites a 403 with the learner-access caveat plus the quiz deep link.
@@ -53,22 +65,21 @@ sections your ticket cites before writing code.
   exit 6 (past-term). RichText fields are emitted as `{text, html}` so both forms wrap under
   `--wrap-untrusted`. `download <ou> <folderId> <fileId> [--submission <sid>] [--out path|-]
   [--force]` streams one file via `requestStream` (attachment route, or the submission-file
-  route with `--submission`): `--out` is a directory (existing or trailing slash, created on
-  demand), a file path, or `-` for raw bytes on stdout (refused with `--json`/`--plain`,
-  exit 2); the name comes from `Content-Disposition` (RFC 6266 `filename*` first), sanitised
-  to one path component, fallback `file-<fileId>`; existing files are never overwritten
-  without `--force` (exit 2); the summary is `{fileId, submissionId, fileName, path, bytes,
-  contentType}`. Bytes reach stdout through a local `ByteSink` cast because `Sink` only
-  promises strings.
+  route with `--submission`) through `src/cli/download.ts`: `--out` is a directory (existing or
+  trailing slash, created on demand), a file path, or `-` for raw bytes on stdout (refused with
+  `--json`/`--plain`, exit 2); the name comes from `Content-Disposition` (RFC 6266 `filename*`
+  first), sanitised to one path component, fallback `file-<fileId>`; existing files are never
+  overwritten without `--force` (exit 2); the summary is `{fileId, submissionId, fileName, path,
+  bytes, contentType}`.
 - `src/cli/commands/announcements.ts` — `bs announcements list|get|download` (bs-ni1). `list <ou>`
   is one GET on `news/` (bare array, no paging) with `--since` (ISO timestamp, `YYYY-MM-DD`, or a
   duration `7d|36h|90m|2w` via `parseSince`) and `--limit` (default 20, applied after the
   newest-first sort); `get <ou> <newsId>` is a filter of that list (D2L has no single-item news
-  route; an unknown or draft id is exit 5); `download <ou> <newsId> [fileId] [--out <dir>]`
-  streams every attachment (or the one `fileId`) through `requestStream` into `--out` (created
-  if missing) via a `.part` temp file + rename, and emits `{fileId, fileName, path, bytes}` rows.
-  `safeFileName()` (basename only, control characters and leading dots stripped, length-capped,
-  fallback `attachment-<fileId>`) and `writeStreamToFile()` live here until a sibling needs them.
+  route; an unknown or draft id is exit 5); `download <ou> <newsId> [fileId] [--out <dir>]
+  [--force]` streams every attachment (or the one `fileId`) through `requestStream` and
+  `src/cli/download.ts` into `--out` (created if missing; names deduplicated within one run as
+  `<stem>-<fileId><ext>`, fallback `attachment-<fileId>`; an existing file is exit 2 without
+  `--force`), and emits `{fileId, fileName, path, bytes}` rows.
 - `src/core/paths.ts` — the single layout decision (PRD 8.1). Resolution is pure;
   `ensureDirs()` creates 0700 dirs and is never called by `--help`, `version`, `schema`.
 - `src/core/config.ts` — tenant knobs (PRD 8.3): flags > `BS_*` env > `config.json` > defaults.
@@ -134,7 +145,7 @@ sections your ticket cites before writing code.
   0600) is the only writer and only `--save-credentials` calls it. The password never reaches a
   log, a prompt echo, or an error message.
 - `src/d2l/` — the typed D2L route layer commands call (one file per resource, evidence in
-  `docs/evidence/d2l-api-web.md`). `common.ts`: `LpTenant`, `d2lId()` (string D2LID → number when
+  `docs/evidence/d2l-api-web.md`). `common.ts`: `LpTenant`, `LeTenant`, `d2lId()` (string D2LID → number when
   numeric), `orgUnitRefOf()`. `links.ts`: every deep-link template from PRD 6.3 (`courseHomeUrl`,
   `assignmentUrl`, `quizUrl`, `gradebookUrl`, `announcementsUrl`); nothing else derives URLs.
   `users.ts`: `whoami()`, `userOf()`. `courses.ts`: `enrollmentsUrl()` (query builder:
@@ -142,34 +153,35 @@ sections your ticket cites before writing code.
   `pagedResultSet`; `--limit` stops fetching), `getEnrollment()`, `getCourse()`, and the pure
   parsers `courseOf()`/`courseDetailOf()` onto the PRD 6.3 Course shape (every value read, only
   `url` computed, dates through `isoSeconds`). Route helpers take `(http, cfg, ...)` where `cfg`
-  is the tenant config (versions from `lpVersion`/`leVersion`, never hard-coded).
+  is the tenant config (versions from `lpVersion`/`leVersion`, never hard-coded). `LeTenant`
+  (the LE twin of `LpTenant`) is defined once in `common.ts` and re-exported by quizzes, grades,
+  assignments, announcements and content, so either import path resolves.
   `content.ts`: `contentTocUrl()`/`contentTopicUrl()`/`contentTopicFileUrl()`/`contentModuleStructureUrl()`,
   `getToc()`, `getTopic()` (400 → UsageError), `getModuleStructure()`, `streamTopicFile()` (a
   `StreamOutcome` for the command to classify), and the pure parsers `tocTree()`/`flattenToc()` (PRD 6.3
   Topic shape with `kind: 'content'`, `path` (module titles joined with " / ", wrapped under
   `--wrap-untrusted` because the row kind is `content`), `depth`; the server `Url` absolutised, never templated;
   CONTENTACTIVITYTYPE_T / CONTENT_TOPIC_T mapped to names with the numeric id kept),
-  `topicDetailOf()`, `moduleChildOf()`/`moduleChildren()`, plus the download-name helpers
-  `filenameFromContentDisposition()` (RFC 6266/5987), `safeFileName()` and `fileNameFromTopicUrl()`.
-  `quizzes.ts`: `LeTenant`, `quizzesUrl()`/`quizItemUrl()`/`quizAttemptsUrl()`, `listQuizzes()` and
+  `topicDetailOf()`, `moduleChildOf()`/`moduleChildren()`, plus `fileNameFromTopicUrl()` (the
+  basename of a File topic's `Url`; header parsing and sanitising live in `src/cli/download.ts`).
+  `quizzes.ts`: `quizzesUrl()`/`quizItemUrl()`/`quizAttemptsUrl()`, `listQuizzes()` and
   `listAttempts()` (async iterables over `objectListPage`, which rejects the dropbox bare-array
   shape), `getQuiz()`, and the pure parsers `quizOf()`/`quizDetailOf()`/`attemptOf()` onto the PRD
   6.3 Item shape with `kind: 'quiz'` (`attemptsAllowed`/`unlimitedAttempts` from `AttemptsAllowed`,
   `timeLimit` from `SubmissionTimeLimit`; rich text read from either `{Text:{Text,Html},IsDisplayed}`
   or flat `{Text,Html}`; `instructions`/`feedback` are text only so every free-text key is one
   `--wrap-untrusted` wraps).
-  `grades.ts`: `LeTenant` (the LE twin of `LpTenant`), the three gradebook routes (`listGradeObjects`
+  `grades.ts`: the three gradebook routes (`listGradeObjects`
   bare array; `listMyGradeValues` maps 404 → `[]`; `getMyFinalGrade` maps 404 → `null`), and the
   pure parsers `gradeTypeOf()` (GRADEOBJ_T 1..9 incl. the tenant's category row, numeric
   `GradeObjectTypeId` before the docs' `GradeType` string), `gradeValueOf()`, `gradeOf()`,
   `joinGrades()` (objects keep their order, orphan values follow) and `finalGradeOf()`.
-  `assignments.ts`: `LeTenant`, the dropbox routes (`foldersUrl()` bare array, `folderUrl()`,
+  `assignments.ts`: the dropbox routes (`foldersUrl()` bare array, `folderUrl()`,
   `mySubmissionsUrl()`, `attachmentUrl()`, `submissionFileUrl()`), `listFolders()` /
   `getFolder()` / `listMySubmissions()` (a non-array 2xx is a shape error), the pure parsers
   `assignmentOf()` / `assignmentDetailOf()` / `submissionOf()` (`Id` and `Name` fatal, every
   other field survives as null; `url` is always `assignmentUrl()`, never
-  `LinkAttachments[].Href`), `enumName()` (int index or name → canonical name) and the
-  download helpers `contentDispositionFilename()` / `safeFileName()`.
+  `LinkAttachments[].Href`) and `enumName()` (int index or name → canonical name).
   `announcements.ts`: `newsUrl()`/`attachmentUrl()`, `listNews()` (bare array or a shape error),
   `streamAttachment()` (non-2xx classified like any route), and the pure parsers
   `announcementOf()`/`announcements()` onto the PRD 6.3 Announcement shape with the
@@ -188,6 +200,8 @@ sections your ticket cites before writing code.
   `--help`, `version`, `schema` and `auth status` never load `playwright-core`.
   `test/fixtures/` holds recorded payloads with a provenance README. `test/live/` (behind
   `BS_LIVE=1`) is the only place that may touch the tenant.
+- `test/cli/download.test.ts` — unit tests for the shared download plumbing (names, `--out`
+  resolution, `.part` + rename, the overwrite rule, stdout sink backpressure).
 - `test/commands/<name>.test.ts` — hermetic command suites: seed a session in a temp `--root`
   (`tempRoot()` + `writeSession(fakeSession({jwt}))`), script HTTP with `fakeTransport`, assert
   on exit code, stdout, stderr and the recorded requests. `test/d2l/` unit-tests the pure

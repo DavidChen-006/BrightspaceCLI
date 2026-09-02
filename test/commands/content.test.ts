@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -697,7 +697,7 @@ test('content download of a non-file topic is exit 2 naming the topic type and u
   }
 });
 
-test('content download: 404 → exit 5, 403 → exit 6, a missing --out parent is an error, no partial files', async () => {
+test('content download: 404 → exit 5, 403 → exit 6, a missing --out parent is created, a blocked one is an error', async () => {
   const { root } = seeded();
   const dir = mkdtempSync(path.join(os.tmpdir(), 'bs-content-dl-'));
   try {
@@ -717,15 +717,65 @@ test('content download: 404 → exit 5, 403 → exit 6, a missing --out parent i
     assert.equal(forbidden.code, EXIT_CODES.permission_denied);
     assert.match(forbidden.stderr, /past-term/);
 
-    const nowhere = await content(
+    const nested = await content(
       root,
       [fileStep({ 'content-disposition': 'attachment; filename="lecture01.pdf"' })],
       ['download', String(OU), '4000001', '--out', path.join(dir, 'missing', 'x.pdf'), '--json'],
     );
-    assert.equal(nowhere.code, EXIT_CODES.error);
-    assert.equal(nowhere.stdout, '');
-    assert.match(nowhere.stderr, /missing/);
-    assert.deepEqual(readdirSync(dir), []);
+    assert.equal(nested.code, 0, nested.stderr);
+    assert.equal(readFileSync(path.join(dir, 'missing', 'x.pdf'), 'utf8'), PDF_BYTES);
+    assert.deepEqual(readdirSync(path.join(dir, 'missing')), ['x.pdf'], 'parent created, no .part');
+
+    writeFileSync(path.join(dir, 'blocker'), 'a file, not a directory');
+    const blocked = await content(
+      root,
+      [fileStep({ 'content-disposition': 'attachment; filename="lecture01.pdf"' })],
+      ['download', String(OU), '4000001', '--out', path.join(dir, 'blocker', 'x.pdf'), '--json'],
+    );
+    assert.equal(blocked.code, EXIT_CODES.error);
+    assert.equal(blocked.stdout, '');
+    assert.match(blocked.stderr, /blocker/);
+    assert.deepEqual(readdirSync(dir).sort(), ['blocker', 'missing']);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('content download never overwrites without --force (exit 2 naming --force); --force replaces', async () => {
+  const { root } = seeded();
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'bs-content-dl-'));
+  const target = path.join(dir, 'lecture01.pdf');
+  writeFileSync(target, 'old contents');
+  try {
+    const refused = await content(
+      root,
+      [fileStep({ 'content-disposition': 'attachment; filename="lecture01.pdf"' })],
+      ['download', String(OU), '4000001', '--out', dir, '--json'],
+    );
+    assert.equal(refused.code, EXIT_CODES.usage);
+    assert.equal(refused.stdout, '');
+    assert.match(refused.stderr, /refusing to overwrite/);
+    assert.match(refused.stderr, /--force/);
+    assert.equal(readFileSync(target, 'utf8'), 'old contents');
+    assert.deepEqual(readdirSync(dir), ['lecture01.pdf'], 'no .part left behind');
+
+    const forced = await content(
+      root,
+      [fileStep({ 'content-disposition': 'attachment; filename="lecture01.pdf"' })],
+      ['download', String(OU), '4000001', '--out', dir, '--json', '--force'],
+    );
+    assert.equal(forced.code, 0, forced.stderr);
+    assert.equal(readFileSync(target, 'utf8'), PDF_BYTES);
+    assert.equal(parseJson<DownloadOut>(forced.stdout).path, target);
+
+    const exact = await content(
+      root,
+      [fileStep({ 'content-disposition': 'attachment; filename="ignored.pdf"' })],
+      ['download', String(OU), '4000001', '--out', target, '--json'],
+    );
+    assert.equal(exact.code, EXIT_CODES.usage, 'an exact --out <file> is refused the same way');
+    assert.match(exact.stderr, /--force/);
   } finally {
     rmSync(root, { recursive: true, force: true });
     rmSync(dir, { recursive: true, force: true });

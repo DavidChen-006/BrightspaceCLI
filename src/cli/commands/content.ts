@@ -6,12 +6,11 @@
  *   module `path` under `--flat`. `--plain` is always the flat rows (TSV cannot nest).
  * - `get` adds `dueDate`/`description` (absent from the TOC); a 400 there is a module id.
  * - `module` lists the children of one module (`modules/(id)/structure/`).
- * - `download` streams `topics/(id)/file` to a directory, an exact path or stdout. The name
+ * - `download` streams `topics/(id)/file` through the shared `src/cli/download.ts` plumbing to
+ *   a directory, an exact path or stdout (`.part` + rename, `--force` to overwrite). The name
  *   comes from `Content-Disposition`, else the topic's file `Url`, else its title, else
  *   `topic-<id>`; a 400 "not a file" is exit 2 with the topic type and `url` in the message.
  */
-import { open, rename, stat, unlink } from 'node:fs/promises';
-import path from 'node:path';
 import { type Command, InvalidArgumentError, Option } from 'commander';
 import {
   AuthRequiredError,
@@ -25,7 +24,6 @@ import { type Row, Table } from '../../core/output.js';
 import type { LeTenant } from '../../d2l/common.js';
 import {
   fileNameFromTopicUrl,
-  filenameFromContentDisposition,
   flattenTree,
   getModuleStructure,
   getToc,
@@ -33,7 +31,6 @@ import {
   MODULE_CHILD_COLUMNS,
   type ModuleChild,
   moduleChildren,
-  safeFileName,
   streamTopicFile,
   TOPIC_COLUMNS,
   type TocModule,
@@ -44,6 +41,14 @@ import {
 } from '../../d2l/content.js';
 import { type CliContext, emit } from '../context.js';
 import { emitList, emitRaw, listEnvelope, withData } from '../data.js';
+import {
+  downloadTo,
+  filenameFromContentDisposition,
+  isStdoutTarget,
+  resolveOutTarget,
+  STDOUT_TARGET,
+  safeFileName,
+} from '../download.js';
 import { parsePositiveInt, typed } from '../options.js';
 import { parseOrgUnit } from './courses.js';
 
@@ -144,6 +149,7 @@ function childTable(rows: readonly ModuleChild[]): string {
 interface DownloadOptions {
   out?: string;
   stdout?: boolean;
+  force?: boolean;
 }
 
 interface DownloadResult {
@@ -153,79 +159,6 @@ interface DownloadResult {
   path: string;
   bytes: number;
   contentType: string | null;
-}
-
-/** process.stdout and the test sinks both take bytes; the CliContext type only promises strings. */
-interface ByteSink {
-  write(chunk: Uint8Array): unknown;
-  once?(event: 'drain', listener: () => void): unknown;
-}
-
-async function pumpToSink(body: ReadableStream<Uint8Array>, sink: ByteSink): Promise<number> {
-  const reader = body.getReader();
-  let bytes = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    bytes += value.byteLength;
-    const ok = sink.write(value);
-    if (ok === false && typeof sink.once === 'function') {
-      await new Promise<void>((resolve) => sink.once?.('drain', resolve));
-    }
-  }
-  return bytes;
-}
-
-function fsError(action: string, target: string, err: unknown): BsError {
-  const reason = err instanceof Error ? err.message : String(err);
-  return new BsError('error', `${action} ${target}: ${reason}`, {
-    hint: 'Check that the --out directory exists and is writable.',
-    cause: err,
-  });
-}
-
-/** Streams to `<target>.part` in the same directory, then renames; nothing partial survives. */
-async function pumpToFile(body: ReadableStream<Uint8Array>, target: string): Promise<number> {
-  const partial = `${target}.part`;
-  let handle: Awaited<ReturnType<typeof open>>;
-  try {
-    handle = await open(partial, 'w', 0o600);
-  } catch (err) {
-    throw fsError('cannot write', partial, err);
-  }
-  let bytes = 0;
-  try {
-    const reader = body.getReader();
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      await handle.write(value);
-      bytes += value.byteLength;
-    }
-    await handle.close();
-    await rename(partial, target);
-  } catch (err) {
-    await handle.close().catch(() => {});
-    await unlink(partial).catch(() => {});
-    throw err instanceof BsError ? err : fsError('cannot write', target, err);
-  }
-  return bytes;
-}
-
-/** `--out` is a directory (existing) to drop the file in, or the exact file path to write. */
-async function resolveTarget(
-  out: string | undefined,
-  fileName: string,
-  cwd: string,
-): Promise<string> {
-  if (out === undefined) return path.resolve(cwd, fileName);
-  const resolved = path.resolve(cwd, out);
-  try {
-    if ((await stat(resolved)).isDirectory()) return path.join(resolved, fileName);
-  } catch {
-    // Does not exist yet: an exact file path.
-  }
-  return resolved;
 }
 
 /** The topic, or null with a warning when its lookup fails for anything but auth/cancel. */
@@ -430,9 +363,10 @@ export function register(program: Command, ctx: CliContext): void {
       ),
     )
     .option('--stdout', 'write the bytes to stdout (same as --out -)')
+    .option('--force', 'overwrite an existing file')
     .action(async (ou: number, topicId: number, opts: DownloadOptions) => {
-      const toStdout = opts.stdout === true || opts.out === '-';
-      if (opts.stdout === true && opts.out !== undefined && opts.out !== '-') {
+      const toStdout = opts.stdout === true || isStdoutTarget(opts.out);
+      if (opts.stdout === true && opts.out !== undefined && !isStdoutTarget(opts.out)) {
         throw new UsageError('--stdout and --out <path> are mutually exclusive');
       }
       const result = await withData(ctx, async (http, cfg): Promise<DownloadResult | null> => {
@@ -457,14 +391,23 @@ export function register(program: Command, ctx: CliContext): void {
         try {
           const contentType = stream.headers['content-type'] ?? null;
           if (toStdout) {
-            const bytes = await pumpToSink(stream.body, ctx.stdout as unknown as ByteSink);
+            const bytes = await downloadTo(ctx, STDOUT_TARGET, stream.body);
             ctx.debug(`content: streamed ${bytes} bytes of topic ${topicId} to stdout`);
             return null;
           }
           const fileName = await pickFileName(ctx, http, cfg, ou, topicId, stream, true);
-          const target = await resolveTarget(opts.out, fileName, ctx.cwd);
-          const bytes = await pumpToFile(stream.body, target);
-          return { topicId, courseId: ou, fileName, path: target, bytes, contentType };
+          const target = await resolveOutTarget(ctx, opts.out, fileName);
+          const bytes = await downloadTo(ctx, target, stream.body, {
+            force: opts.force === true,
+          });
+          return {
+            topicId,
+            courseId: ou,
+            fileName,
+            path: target.kind === 'stdout' ? '-' : target.path,
+            bytes,
+            contentType,
+          };
         } catch (err) {
           await stream.body.cancel().catch(() => {});
           throw err;

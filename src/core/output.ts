@@ -8,9 +8,14 @@ import { randomBytes } from 'node:crypto';
 
 export type OutputMode = 'json' | 'plain' | 'human';
 
-/** Minimal writable surface shared by process.stdout and test sinks. */
+/**
+ * Minimal writable surface shared by process.stdout and test sinks. Text writers pass strings;
+ * the download verbs pass raw bytes (`--out -`). A `false` from `write` means the sink wants a
+ * `drain` before more; sinks without `once` are assumed unbounded.
+ */
 export interface Sink {
-  write(chunk: string): unknown;
+  write(chunk: string | Uint8Array): unknown;
+  once?(event: 'drain', listener: () => void): unknown;
 }
 
 // ---------------------------------------------------------------------------------------------
