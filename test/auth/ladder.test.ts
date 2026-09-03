@@ -284,7 +284,10 @@ test('the silent rung is skipped when profile/ is missing or empty, and run when
     assert.equal(missing.state, 'none');
     if (missing.state === 'none') assert.equal(missing.hint, HINT_LOGIN);
     assert.equal(statusOf(paths).state, 'none', 'status.json is still written');
-    assert.ok(lg.lines.some((l) => /skipping rung 1 \(silent\)/.test(l)), lg.lines.join('\n'));
+    assert.ok(
+      lg.lines.some((l) => /skipping rung 1 \(silent\)/.test(l)),
+      lg.lines.join('\n'),
+    );
 
     // An empty profile/ is not a profile either.
     mkdirSync(paths.profileDir, { recursive: true });

@@ -29,12 +29,19 @@ interface Course {
   homeUrl: string | null;
   url: string;
 }
+interface RouteFailure {
+  route: string;
+  status: number | null;
+  message: string;
+}
 interface CourseDetail extends Course {
   path: string | null;
   description: string | null;
   descriptionHtml: string | null;
   semester: { id: number; name: string; code: string } | null;
   department: { id: number; name: string; code: string } | null;
+  partial: boolean;
+  failures: RouteFailure[];
 }
 interface ListOut {
   items: Course[];
@@ -65,6 +72,9 @@ function twoPages(): [Page, Page] {
 }
 const EMPTY: Page = { PagingInfo: { Bookmark: '', HasMoreItems: false }, Items: [] };
 const ENROLLMENT_1498777 = FULL.Items.find((i) => i.OrgUnit.Id === 1498777) as RawItem;
+/** Purdue Civics Knowledge Test: active, no end date — the "not past-term" 403 case. */
+const ENROLLMENT_412690 = FULL.Items.find((i) => i.OrgUnit.Id === 412690) as RawItem;
+const OFFERING_ROUTE = '/d2l/api/lp/1.62/courses/1498777';
 
 const FAR_FUTURE = '2999-01-01T00:00:00Z';
 const FRESH_JWT = fakeJwt({ exp: Date.parse(FAR_FUTURE) / 1000, sub: 'first' });
@@ -379,6 +389,8 @@ test('courses get merges the enrollment with the course offering', async () => {
       descriptionHtml: OFFERING.Description.Html,
       semester: { id: 1480001, name: 'Spring 2026', code: '202620' },
       department: { id: 6813, name: 'Philosophy', code: 'PHIL' },
+      partial: false,
+      failures: [],
     });
     assert.equal(r.stderr, '');
   } finally {
@@ -386,7 +398,7 @@ test('courses get merges the enrollment with the course offering', async () => {
   }
 });
 
-test('courses get: the offering call failing costs only its fields (warning on stderr)', async () => {
+test('courses get: a failing offering call is partial: true plus a failures entry, not just stderr', async () => {
   const { root } = seeded();
   try {
     const r = await courses(
@@ -402,7 +414,92 @@ test('courses get: the offering call failing costs only its fields (warning on s
     assert.equal(out.semester, null);
     assert.equal(out.department, null);
     assert.equal(out.path, null);
+    // The machine-readable half of the warning (bs-6j8): a script that ignores stderr still sees it.
+    assert.equal(out.partial, true);
+    assert.equal(out.failures.length, 1);
+    assert.equal(out.failures[0]?.route, `GET ${OFFERING_ROUTE}`);
+    assert.equal(out.failures[0]?.status, 403);
+    assert.match(out.failures[0]?.message ?? '', /HTTP 403/);
     assert.match(r.stderr, /warning: .*courses\/1498777.*403/);
+    // The course ended in May 2026, and courses get holds the enrollment that says so (bs-6j8).
+    assert.match(r.stderr, /This course ended on 2026-05-24; 403 is normal after the term\./);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('courses get: a 403 on an active course says so instead of blaming the term', async () => {
+  const { root } = seeded();
+  try {
+    const r = await courses(
+      root,
+      [jsonStep(ENROLLMENT_412690), { status: 403, body: 'Not authorized' }],
+      ['get', '412690', '--json'],
+    );
+    assert.equal(r.code, 0, r.stderr);
+    assert.equal(parseJson<CourseDetail>(r.stdout).partial, true);
+    assert.match(
+      r.stderr,
+      /The course is active; the tool is probably disabled for learners here\./,
+    );
+    assert.equal(/ended on/.test(r.stderr), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('courses get: --select partial,failures projects both, and --plain gains a partial column', async () => {
+  const { root } = seeded();
+  try {
+    const selected = await courses(
+      root,
+      [jsonStep(ENROLLMENT_1498777), { status: 403, body: 'Not authorized' }],
+      ['get', '1498777', '--json', '--select', 'partial,failures'],
+    );
+    assert.equal(selected.code, 0, selected.stderr);
+    const out = parseJson<{ partial: boolean; failures: RouteFailure[] }>(selected.stdout);
+    assert.deepEqual(Object.keys(out), ['partial', 'failures']);
+    assert.equal(out.partial, true);
+    assert.equal(out.failures[0]?.status, 403);
+
+    const plain = await courses(
+      root,
+      [jsonStep(ENROLLMENT_1498777), { status: 403, body: 'Not authorized' }],
+      ['get', '1498777', '--plain'],
+    );
+    assert.equal(plain.code, 0, plain.stderr);
+    const map = new Map(
+      plain.stdout
+        .trimEnd()
+        .split('\n')
+        .slice(1)
+        .map((l) => l.split('\t') as [string, string]),
+    );
+    assert.equal(map.get('partial'), 'true');
+    assert.match(map.get('failures') ?? '', /"status":403/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('courses get --wrap-untrusted leaves failures[].route and .message unwrapped', async () => {
+  const { root } = seeded();
+  try {
+    const r = await courses(
+      root,
+      [jsonStep(ENROLLMENT_1498777), { status: 403, body: 'Not authorized' }],
+      ['get', '1498777', '--json', '--wrap-untrusted'],
+    );
+    assert.equal(r.code, 0, r.stderr);
+    const out = parseJson<CourseDetail>(r.stdout);
+    const failure = out.failures[0];
+    // Both are composed by bs itself (a method, a path, a classified status line), never by an
+    // instructor, so wrapping them would only make the diagnosis harder to read (bs-6j8).
+    assert.equal(failure?.route, `GET ${OFFERING_ROUTE}`);
+    assert.equal(failure?.message?.includes(MARKER_START), false, failure?.message);
+    assert.match(failure?.message ?? '', /^GET .*HTTP 403/);
+    // The tenant's own text next to it still wraps.
+    assert.match(String(out.name), new RegExp(MARKER_START));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

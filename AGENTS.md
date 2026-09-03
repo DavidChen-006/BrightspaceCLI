@@ -19,7 +19,12 @@ sections your ticket cites before writing code.
   `retryOnceOnSessionExpired` and routes against the session's tenant; no session → exit 4 with
   no data request; never opens a browser), `listEnvelope()`/`emitList()` (PRD 6.3 `{items, count,
   fetchedAt}` plus `--fail-empty` → exit 3 after the output is written) and `emitRaw()` (`--raw`:
-  the payload as decoded, `--select` ignored, `--wrap-untrusted` still applied).
+  the payload as decoded, `--select` ignored, `--wrap-untrusted` still applied). It also owns the
+  partial-result vocabulary (bs-6j8): `RouteFailure {route, status, message}`, `httpStatusOf()`,
+  `routeFailure()` and `forbiddenNote(course)` (the 403 sentence a command may add once it holds
+  the enrollment: `This course ended on <date>; …` or `The course is active; …`). `route` and
+  `message` inside a `failures[]` entry are bs-generated, so `src/core/output.ts` demotes exactly
+  those two keys under that parent and `--wrap-untrusted` leaves them readable.
 - `src/cli/download.ts` — what every `download` verb shares (bs-rst): `filenameFromContentDisposition()`
   (RFC 6266/5987 `filename*` first, then quoted, then bare), `safeFileName()` (one path component,
   control and `<>:"|?*` characters stripped, no leading dots, 255-byte cap keeping the extension,
@@ -47,6 +52,14 @@ sections your ticket cites before writing code.
   with the command in the hint), runs `deps.install` and re-runs only the browser check.
 - `src/cli/commands/whoami.ts`, `src/cli/commands/courses.ts` — `bs whoami`, `bs courses list|get`
   (bs-0am): thin actions that parse flags, call `src/d2l/` through `withData`, shape, emit.
+  `courses get` merges `myenrollments/(ou)` (the primitive; its 404/403 is fatal) with
+  `courses/(ou)` and always emits `partial` and `failures[{route, status, message}]` beside the
+  PRD CourseDetail (bs-6j8): `false`/`[]` on full success, `true` plus the one entry when
+  `courses/(ou)` failed and `path`/`description`/`semester`/`department` are therefore null. The
+  stderr warning stays, and on a 403 it appends `forbiddenNote()` — the enrollment is in hand, so
+  it can say whether the term ended or the tool is closed to the role. `--plain` gets `partial`
+  and `failures` rows for free (the shape is key/value); `--raw` is unchanged (`{enrollment,
+  offering}`).
 - `src/cli/commands/content.ts` — `bs content toc|get|module|download <ou> [<id>]` (bs-kzf): `toc` is one
   GET emitting the module tree (`--flat`: one Topic row per topic with its module `path`; `--plain` is
   always the flat rows); `get` adds `dueDate`/`description` and maps a 400 (a module id) to exit 2;

@@ -3,8 +3,14 @@
  * the `src/d2l/courses.ts` routes; the shapes are the PRD Course / CourseDetail.
  */
 import { type Command, InvalidArgumentError, Option } from 'commander';
-import { AuthRequiredError, BsError, CancelledError, NotFoundError } from '../../core/errors.js';
-import { collect } from '../../core/http/index.js';
+import {
+  AuthRequiredError,
+  BsError,
+  CancelledError,
+  NotFoundError,
+  PermissionDeniedError,
+} from '../../core/errors.js';
+import { collect, displayPath } from '../../core/http/index.js';
 import { Table } from '../../core/output.js';
 import {
   COURSE_COLUMNS,
@@ -12,7 +18,9 @@ import {
   type CourseDetail,
   type CourseOffering,
   courseDetailOf,
+  courseOf,
   courses,
+  courseUrl,
   ENROLLMENT_SORTS,
   type EnrollmentSort,
   getCourse,
@@ -21,7 +29,15 @@ import {
   type MyOrgUnitInfo,
 } from '../../d2l/courses.js';
 import { type CliContext, emit } from '../context.js';
-import { emitList, emitRaw, listEnvelope, withData } from '../data.js';
+import {
+  emitList,
+  emitRaw,
+  forbiddenNote,
+  listEnvelope,
+  type RouteFailure,
+  routeFailure,
+  withData,
+} from '../data.js';
 import { parsePositiveInt, typed } from '../options.js';
 
 interface ListOptions {
@@ -56,7 +72,14 @@ function courseTable(rows: readonly Course[]): string {
   return table.render();
 }
 
-function detailText(d: CourseDetail): string {
+/** PRD 6.3 CourseDetail plus the partial-result contract (bs-6j8). */
+interface CourseDetailResult extends CourseDetail {
+  /** True when a route failed and some fields are missing because of it. */
+  partial: boolean;
+  failures: RouteFailure[];
+}
+
+function detailText(d: CourseDetailResult): string {
   const lines = [
     `${d.name}  (${d.code ?? 'no code'})  id ${d.id}`,
     `role: ${d.role ?? '-'}  active: ${d.isActive ? 'yes' : 'no'}  access: ${d.canAccess ? 'yes' : 'no'}`,
@@ -64,6 +87,11 @@ function detailText(d: CourseDetail): string {
     `semester: ${d.semester?.name ?? '-'}  department: ${d.department?.name ?? '-'}`,
     `url: ${d.url}`,
   ];
+  if (d.partial) {
+    lines.push(
+      `partial: ${d.failures.map((f) => `${f.route} (${f.status ?? 'failed'})`).join(', ')}`,
+    );
+  }
   if (d.description) lines.push('', d.description);
   return `${lines.join('\n')}\n`;
 }
@@ -146,7 +174,7 @@ export function register(program: Command, ctx: CliContext): void {
     .argument('<ou>', 'org unit id', parseOrgUnit)
     .option('--raw', 'emit both payloads as D2L sent them: {enrollment, offering}')
     .action(async (ou: number, opts: { raw?: boolean }) => {
-      const { enrollment, offering, baseUrl } = await withData(ctx, async (http, cfg) => {
+      const { enrollment, offering, failures, baseUrl } = await withData(ctx, async (http, cfg) => {
         let enrollment: MyOrgUnitInfo;
         try {
           enrollment = await getEnrollment(http, cfg, ou);
@@ -159,14 +187,23 @@ export function register(program: Command, ctx: CliContext): void {
           throw err;
         }
         let offering: CourseOffering | null = null;
+        const failures: RouteFailure[] = [];
         try {
           offering = await getCourse(http, cfg, ou);
         } catch (err) {
           if (!(err instanceof BsError)) throw err;
           if (err instanceof AuthRequiredError || err instanceof CancelledError) throw err;
-          ctx.warn(`${err.message}; description, path, semester and department omitted`);
+          failures.push(routeFailure(`GET ${displayPath(courseUrl(cfg, ou))}`, err));
+          // The enrollment is already in hand, so a 403 can say which of the two causes it is
+          // (bs-6j8); the classifier's own hint has to stay neutral.
+          const course =
+            err instanceof PermissionDeniedError ? courseOf(enrollment, cfg.baseUrl) : null;
+          const note = course === null ? null : forbiddenNote(course);
+          ctx.warn(
+            `${err.message}; description, path, semester and department omitted${note === null ? '' : `. ${note}`}`,
+          );
         }
-        return { enrollment, offering, baseUrl: cfg.baseUrl };
+        return { enrollment, offering, failures, baseUrl: cfg.baseUrl };
       });
       if (opts.raw) {
         emitRaw(ctx, { enrollment, offering });
@@ -178,13 +215,15 @@ export function register(program: Command, ctx: CliContext): void {
           hint: 'Run: bs courses get <ou> --raw  to inspect the payload, or bs auth doctor',
         });
       }
+      // `partial`/`failures` are always present so the shape never changes with the weather.
+      const value: CourseDetailResult = { ...detail, partial: failures.length > 0, failures };
       emit(ctx, {
-        value: detail,
+        value,
         tsv: {
           columns: ['key', 'value'],
-          rows: Object.entries(detail).map(([key, value]) => ({ key, value })),
+          rows: Object.entries(value).map(([key, v]) => ({ key, value: v })),
         },
-        human: () => detailText(detail),
+        human: () => detailText(value),
       });
     });
 }

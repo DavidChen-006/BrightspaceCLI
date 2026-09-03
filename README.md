@@ -196,7 +196,28 @@ Lists come back in an envelope — `items`, `count`, `fetchedAt`:
 ```
 
 `bs courses get` adds `path`, `description`, `descriptionHtml`, `semester` and `department` (each
-`{id, name, code}` or `null`) to the same keys. A failing second call costs only its fields.
+`{id, name, code}` or `null`) to the same keys, plus `partial` and `failures` so a script never has
+to read stderr to know the record is complete:
+
+```json
+{
+  "id": 1631402, "name": "Fall 2026 CS 21100-CP1 LEC", "code": "wl.202710.CS.21100.CP1",
+  "role": "Learner", "isActive": true, "canAccess": true,
+  "startDate": "2026-08-24T04:00:00Z", "endDate": "2026-12-19T04:59:00Z",
+  "homeUrl": null, "url": "https://purdue.brightspace.com/d2l/home/1631402",
+  "path": null, "description": null, "descriptionHtml": null,
+  "semester": null, "department": null,
+  "partial": true,
+  "failures": [
+    { "route": "GET /d2l/api/lp/1.62/courses/1631402", "status": 403,
+      "message": "GET /d2l/api/lp/1.62/courses/1631402: HTTP 403: Not Authorized" }
+  ]
+}
+```
+
+On full success the same keys are `"partial": false` and `"failures": []`, so the shape never
+changes. The `courses/(ou)` call failing costs only its own fields — `path`, `description`,
+`descriptionHtml`, `semester`, `department` — and still exits `0` with a warning on stderr.
 
 ### What is due soon
 

@@ -313,6 +313,16 @@ const CONTENT_KEYS_BY_KIND: Readonly<Record<string, ReadonlySet<string>>> = {
 };
 const NO_KEYS: ReadonlySet<string> = new Set();
 
+/**
+ * Keys that are metadata only directly inside a named array. A `failures[]` entry (bs-6j8) is
+ * composed by `bs` itself — `route` is a method and a path, `message` is the classifier's
+ * diagnosis line — so neither is tenant text. `message` stays content everywhere else: a raw
+ * discussion post's `Message` is exactly what wrapping exists for.
+ */
+const METADATA_KEYS_BY_PARENT: Readonly<Record<string, ReadonlySet<string>>> = {
+  failures: new Set(['route', 'message']),
+};
+
 function normalizeKey(key: string): string {
   return key.replace(/[_-]/g, '').toLowerCase();
 }
@@ -325,6 +335,8 @@ function shouldWrap(
   const k = normalizeKey(key);
   if (siblingContent.has(k)) return true;
   if (METADATA_KEYS.has(k)) return false;
+  const parent = ancestors[ancestors.length - 1];
+  if (parent !== undefined && METADATA_KEYS_BY_PARENT[normalizeKey(parent)]?.has(k)) return false;
   if (METADATA_SUFFIXES.some((s) => k.length > s.length && k.endsWith(s))) return false;
   if (CONTENT_KEYS.has(k)) return true;
   if (CONTENT_SUFFIXES.some((s) => k.endsWith(s))) return true;
