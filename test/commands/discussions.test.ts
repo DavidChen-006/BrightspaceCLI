@@ -240,7 +240,7 @@ test('discussions forums: an object instead of the bare array is an unexpected s
   }
 });
 
-test('discussions forums: 404 → exit 5; 403 → exit 6 with the past-term hint', async () => {
+test('discussions forums: 404 → exit 5; 403 → exit 6 with the neutral denied hint', async () => {
   const { root } = seeded();
   try {
     const missing = await discussions(
@@ -259,7 +259,7 @@ test('discussions forums: 404 → exit 5; 403 → exit 6 with the past-term hint
     );
     assert.equal(denied.code, EXIT_CODES.permission_denied);
     assert.equal(denied.stdout, '');
-    assert.match(denied.stderr, /past-term/);
+    assert.match(denied.stderr, /denied this route/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -389,7 +389,7 @@ test('discussions topics (all forums): one forum failing costs only its topics w
     );
     assert.equal(all.code, EXIT_CODES.permission_denied);
     assert.equal(all.stdout, '');
-    assert.match(all.stderr, /past-term/);
+    assert.match(all.stderr, /denied this route/);
 
     const noForums = await discussions(root, [jsonStep([])], ['topics', String(OU), '--json']);
     assert.equal(noForums.code, 0, noForums.stderr);
@@ -492,7 +492,7 @@ test('discussions topics: 404 on an unknown forum → exit 5 with a forums hint;
       ['topics', '1092755', '12001', '--json'],
     );
     assert.equal(denied.code, EXIT_CODES.permission_denied);
-    assert.match(denied.stderr, /past-term/);
+    assert.match(denied.stderr, /denied this route/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -737,7 +737,7 @@ test('discussions posts: 404 → exit 5 with a topics hint; 403 → exit 6; non-
       ['posts', '1092755', '12001', '31001', '--json'],
     );
     assert.equal(denied.code, EXIT_CODES.permission_denied);
-    assert.match(denied.stderr, /past-term/);
+    assert.match(denied.stderr, /denied this route/);
 
     const shape = await discussions(
       root,

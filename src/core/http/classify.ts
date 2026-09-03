@@ -17,6 +17,15 @@ import { displayPath, type HttpResponse } from './types.js';
 
 export const SESSION_EXPIRED_MARKER = 'sessionExpired=1';
 
+/**
+ * The hint on every PermissionDeniedError. Neutral by construction (bs-6j8): `classify()` sees
+ * a status and a body, never the course, so it cannot know whether the term has ended. Commands
+ * that already hold the enrollment append a diagnosis of their own — see `forbiddenNote()` in
+ * `src/cli/data.ts`.
+ */
+export const FORBIDDEN_HINT =
+  'Brightspace denied this route (HTTP 403). Your role may lack this permission in this course, or the course may be past-term.';
+
 export type ClassKind =
   | 'ok'
   | 'SessionExpired'
@@ -180,9 +189,7 @@ export function toError(c: Classification): BsError {
         hint: 'Check the id and the trailing slash: collections end with "/", single items do not.',
       });
     case 'Forbidden':
-      return new PermissionDeniedError(c.message, {
-        hint: '403 on a past-term course is normal; this route needs a permission your role lacks.',
-      });
+      return new PermissionDeniedError(c.message, { hint: FORBIDDEN_HINT });
     case 'RateLimited':
       return new RateLimitedError(c.message);
     case 'Retryable':

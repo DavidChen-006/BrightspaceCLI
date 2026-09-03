@@ -408,7 +408,7 @@ test('courses get: the offering call failing costs only its fields (warning on s
   }
 });
 
-test('courses get 404 → exit 5 with a hint; 403 → exit 6 with the past-term hint', async () => {
+test('courses get 404 → exit 5 with a hint; 403 → exit 6 with the neutral denied hint', async () => {
   const { root } = seeded();
   try {
     const missing = await courses(
@@ -429,7 +429,7 @@ test('courses get 404 → exit 5 with a hint; 403 → exit 6 with the past-term 
     );
     assert.equal(denied.code, EXIT_CODES.permission_denied);
     assert.equal(denied.stdout, '');
-    assert.match(denied.stderr, /past-term/);
+    assert.match(denied.stderr, /denied this route/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

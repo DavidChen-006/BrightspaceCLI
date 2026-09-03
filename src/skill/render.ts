@@ -53,7 +53,7 @@ const EXIT_MEANINGS: Record<ExitCodeName, string> = {
   auth_required:
     'no session, or the silent re-login failed — run `bs auth refresh`, then `bs auth login`',
   not_found: 'HTTP 404: the course, item or route does not exist (or you cannot see it)',
-  permission_denied: 'HTTP 403: a past-term course or a route closed to learners; not retryable',
+  permission_denied: 'HTTP 403: a route closed to your role, or a past-term course; not retryable',
   rate_limited: 'HTTP 429 after retries — back off and try again later',
   retryable: 'HTTP 5xx, a timeout or a network error after retries — safe to retry',
   config: 'bad configuration: unwritable state root, missing browser, unsupported LP/LE version',

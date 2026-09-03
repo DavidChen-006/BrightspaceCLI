@@ -312,7 +312,7 @@ test('content toc --raw emits the {Modules} payload; human mode renders an inden
   }
 });
 
-test('content toc maps 403 to exit 6 with the past-term hint and 404 to exit 5', async () => {
+test('content toc maps 403 to exit 6 with the neutral denied hint and 404 to exit 5', async () => {
   const { root } = seeded();
   try {
     const forbidden = await content(
@@ -326,7 +326,7 @@ test('content toc maps 403 to exit 6 with the past-term hint and 404 to exit 5',
       forbidden.stderr,
       /bs: GET .*\/content\/toc\?ignoreDateRestrictions=true: HTTP 403/,
     );
-    assert.match(forbidden.stderr, /past-term/);
+    assert.match(forbidden.stderr, /denied this route/);
 
     const missing = await content(
       root,
@@ -715,7 +715,7 @@ test('content download: 404 → exit 5, 403 → exit 6, a missing --out parent i
       ['download', String(OU), '4000001', '--out', dir, '--json'],
     );
     assert.equal(forbidden.code, EXIT_CODES.permission_denied);
-    assert.match(forbidden.stderr, /past-term/);
+    assert.match(forbidden.stderr, /denied this route/);
 
     const nested = await content(
       root,

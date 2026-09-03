@@ -452,7 +452,7 @@ neither output flag was given.
 | 3 | `empty_results` | a list returned nothing and `--fail-empty` was given (output still written) |
 | 4 | `auth_required` | no session, the silent rung failed, `--no-input` suppressed a login, or a 401 survived one re-mint |
 | 5 | `not_found` | HTTP 404 (except the documented "no grades yet" 404s) |
-| 6 | `permission_denied` | HTTP 403 on a data route: a past-term course, or a route closed to learners |
+| 6 | `permission_denied` | HTTP 403 on a data route: a route closed to your role, or a past-term course |
 | 7 | `rate_limited` | HTTP 429 after retries |
 | 8 | `retryable` | HTTP 5xx after retry, network error, timeout, DNS/TLS |
 | 10 | `config` | root not writable, browser missing and install declined, unsupported LP/LE version, bad base URL |
@@ -572,11 +572,15 @@ exits `4`, the Entra cookie in `profile/` has expired and a human must run `bs a
 **A data command exits 4 mid-script.** The tenant answered `sessionExpired=1` or a 401. `bs`
 re-mints and re-runs the silent rung once automatically; exit `4` means even that failed.
 
-**Exit 6 on some courses — this is normal.** Brightspace answers HTTP 403 for courses whose term has
-ended, even though they still appear in your enrollments. `bs upcoming` treats it as expected and
-prints one stderr line (`N courses returned 403 (past-term); details with --verbose`) instead of
-failing. For a single command, pick a current course: `bs courses list` hides ended courses by
-default.
+**Exit 6 (`403`) on a course route.** Two different things look the same. The course's term has
+ended — common, since ended courses stay in your enrollments — or the course is current but the
+tool is closed to your role (a discussion area with no learner access, say). The hint is neutral
+for that reason: `Brightspace denied this route (HTTP 403). Your role may lack this permission in
+this course, or the course may be past-term.` Where `bs` already holds the enrollment it says
+which: `bs courses get <ou>` and `bs upcoming --verbose` add either `This course ended on <date>;
+403 is normal after the term.` or `The course is active; the tool is probably disabled for learners
+here.` `bs upcoming` never fails on a 403 — it names the courses on stderr and carries them in
+`failures` — and `bs courses list` hides ended courses by default.
 
 **The browser is missing.** Run `bs auth doctor`; it names the exact command
 (`node node_modules/playwright-core/cli.js install chromium`, ~300 MB) and `--install-browser` runs

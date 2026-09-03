@@ -55,7 +55,7 @@ every command, flag, positional, enum and exit code. `bs upcoming` is the fastes
 | 3 | `empty_results` | a list returned nothing and `--fail-empty` was given (the output was still written) |
 | 4 | `auth_required` | no session, or the silent re-login failed — run `bs auth refresh`, then `bs auth login` |
 | 5 | `not_found` | HTTP 404: the course, item or route does not exist (or you cannot see it) |
-| 6 | `permission_denied` | HTTP 403: a past-term course or a route closed to learners; not retryable |
+| 6 | `permission_denied` | HTTP 403: a route closed to your role, or a past-term course; not retryable |
 | 7 | `rate_limited` | HTTP 429 after retries — back off and try again later |
 | 8 | `retryable` | HTTP 5xx, a timeout or a network error after retries — safe to retry |
 | 10 | `config` | bad configuration: unwritable state root, missing browser, unsupported LP/LE version |

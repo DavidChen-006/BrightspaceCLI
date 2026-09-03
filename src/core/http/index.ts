@@ -7,6 +7,7 @@ export {
   type ClassifyOptions,
   type ClassKind,
   classify,
+  FORBIDDEN_HINT,
   type ProblemDetails,
   problemDetails,
   readJson,

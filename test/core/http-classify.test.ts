@@ -12,6 +12,7 @@ import {
 } from '../../src/core/errors.js';
 import {
   classify,
+  FORBIDDEN_HINT,
   type HttpResponse,
   problemDetails,
   readJson,
@@ -115,14 +116,17 @@ test('401 with the bogus-bearer fixture is AuthRequired, not SessionExpired', ()
   assert.equal(err.hint, 'Run: bs auth login');
 });
 
-test('403 on a data route is Forbidden with the past-term hint', () => {
+test('403 on a data route is Forbidden with a neutral hint that assumes no diagnosis', () => {
   const c = classify(res(403));
   assert.equal(c.kind, 'Forbidden');
   const err = toError(c);
   assert.ok(err instanceof PermissionDeniedError);
   assert.equal(err.exitCode, 6);
   assert.match(err.message, /403/);
-  assert.match(err.hint ?? '', /past-term course is normal/);
+  assert.equal(err.hint, FORBIDDEN_HINT);
+  // bs-6j8: the hint reaches active courses too, so it may not lead with "past-term".
+  assert.match(err.hint ?? '', /denied this route \(HTTP 403\)/);
+  assert.equal(/^403 on a past-term course/.test(err.hint ?? ''), false);
 });
 
 test('403 on the mint route is SessionExpired', () => {
