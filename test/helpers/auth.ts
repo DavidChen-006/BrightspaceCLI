@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
@@ -78,6 +78,15 @@ export function assertNoSecrets(text: string, secrets: readonly string[], label 
 export function tempRoot(prefix = 'bs-auth-'): { root: string; paths: BsPaths } {
   const root = mkdtempSync(path.join(os.tmpdir(), prefix));
   return { root, paths: resolvePaths({ root, env: {} }) };
+}
+
+/**
+ * Makes `profile/` look like a real persistent browser profile: `profileExists()` (and so the
+ * silent rung's fail-fast gate) only counts a directory that holds something.
+ */
+export function seedProfile(paths: BsPaths): void {
+  mkdirSync(paths.profileDir, { recursive: true, mode: 0o700 });
+  writeFileSync(path.join(paths.profileDir, 'Default'), 'fake profile');
 }
 
 export function mintOkStep(jwt: string, extra: Record<string, unknown> = {}): Step {
