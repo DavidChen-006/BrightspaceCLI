@@ -51,11 +51,16 @@ data.
 ## Install
 
 ```sh
-git clone <this repo> && cd BrightspaceCLI
+git clone https://github.com/DavidChen-006/BrightspaceCLI.git && cd BrightspaceCLI
+# or, over SSH:  git clone git@github.com:DavidChen-006/BrightspaceCLI.git && cd BrightspaceCLI
 npm ci
 npm run build
 npm link            # puts `bs` (and `brightspace`) on your PATH
 ```
+
+`npm link` installs global `bs` and `brightspace` command links into your npm prefix (so it can
+shadow an existing `bs`, and it needs that prefix to be writable); `npm unlink -g brightspace-cli`
+removes them again.
 
 Without linking, `node dist/bin/bs.js <args>` is identical, and `npx .` runs the local package. To
 hack on it without building, `npm run dev -- <args>` runs from source through `tsx`.
