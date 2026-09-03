@@ -219,6 +219,13 @@ export function register(program: Command, ctx: CliContext): void {
       // exercised can expire while everything looks green (Brightspace-Bar Extra 6, quirk 10).
       const silent = ctx.rungs.filter((rung) => rung.kind === 'silent');
       if (silent.length === 0) log('auth refresh: no silent rung is registered');
+      // climb() skips the silent rung without a profile (bs-6j8); refresh is the user's own
+      // deliberate choice, so it still runs and only says why it is unlikely to work.
+      if (!profileExists(paths)) {
+        log(
+          `auth refresh: no browser profile in ${paths.profileDir}; the silent rung can only fail`,
+        );
+      }
       let restored: Session | null = null;
       for (const rung of silent) {
         try {

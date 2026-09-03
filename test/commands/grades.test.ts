@@ -193,7 +193,7 @@ test('grades list: values 404 means "no grades yet": every item has myValue null
   }
 });
 
-test('grades list: objects 403 → exit 6 with the past-term hint; objects 404 → exit 5; no stdout', async () => {
+test('grades list: objects 403 → exit 6 with the neutral denied hint; objects 404 → exit 5; no stdout', async () => {
   const { root } = seeded();
   try {
     const denied = await grades(root, { [OBJECTS_PATH]: [FORBIDDEN], [VALUES_PATH]: [FORBIDDEN] }, [
@@ -204,7 +204,7 @@ test('grades list: objects 403 → exit 6 with the past-term hint; objects 404 �
     assert.equal(denied.code, EXIT_CODES.permission_denied);
     assert.equal(denied.stdout, '');
     assert.match(denied.stderr, /bs: GET .*grades\/: HTTP 403/);
-    assert.match(denied.stderr, /past-term/);
+    assert.match(denied.stderr, /denied this route/);
 
     const missing = await grades(
       root,
@@ -564,7 +564,7 @@ test('grades final 404: released:false shape, exit 0; exit 3 only under --fail-e
     ]);
     assert.equal(denied.code, EXIT_CODES.permission_denied);
     assert.equal(denied.stdout, '');
-    assert.match(denied.stderr, /past-term/);
+    assert.match(denied.stderr, /denied this route/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

@@ -351,7 +351,7 @@ test('calendar events: --plain columns, human table, --select, --raw, --wrap-unt
   }
 });
 
-test('calendar events: 403 → exit 6 with the past-term hint; 404 → exit 5; bad shape → error', async () => {
+test('calendar events: 403 → exit 6 with the neutral denied hint; 404 → exit 5; bad shape → error', async () => {
   const { root } = seeded();
   try {
     const denied = await calendar(
@@ -362,7 +362,7 @@ test('calendar events: 403 → exit 6 with the past-term hint; 404 → exit 5; b
     assert.equal(denied.code, EXIT_CODES.permission_denied);
     assert.equal(denied.stdout, '');
     assert.match(denied.stderr, /bs: GET .*myEvents\/.*: HTTP 403/);
-    assert.match(denied.stderr, /past-term/);
+    assert.match(denied.stderr, /denied this route/);
 
     const missing = await calendar(
       root,

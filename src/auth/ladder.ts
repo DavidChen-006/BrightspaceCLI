@@ -8,7 +8,9 @@
  * `sessionExpired` is the ONLY signal that climbs: a mint that fails for any other reason
  * (network, 5xx, a body without a token) stops the ladder and is reported as retryable. A
  * rung that returns a session gets it persisted, then minted; one that returns null or throws
- * is a failed rung and the ladder goes on. `climb()` never throws (cancellation excepted) and
+ * is a failed rung and the ladder goes on. The silent rung is skipped outright when `profile/`
+ * holds nothing (it could only fail, at the cost of a browser launch); `bs auth refresh` drives
+ * it directly and is therefore never gated. `climb()` never throws (cancellation excepted) and
  * never deletes session.json or profile/ — `bs auth logout` is the only command that does.
  * Every call ends by writing `cache/status.json` (atomic, 0600), the last ladder outcome.
  *
@@ -109,6 +111,7 @@ async function climbRungs(
   const rungs = input.rungs ?? [];
   let session = readSession(paths);
   let silentTried = false;
+  let silentSkipped = false;
 
   if (session === null) {
     log('auth: no session.json');
@@ -135,6 +138,13 @@ async function climbRungs(
     const name = `rung ${index + 1} (${rung.kind})`;
     if (rung.kind === 'full' && !input.allowFull) {
       log(`auth: skipping ${name}: a full login needs bs auth login`);
+      continue;
+    }
+    if (rung.kind === 'silent' && !profileExists(paths)) {
+      // Fail fast (bs-6j8): a silent SSO replays the Entra cookie that lives in profile/, so
+      // with no profile the only outcome is a ~4 s Chromium launch and a null.
+      silentSkipped = true;
+      log(`auth: skipping ${name}: no browser profile in ${paths.profileDir}`);
       continue;
     }
     if (rung.kind === 'silent') silentTried = true;
@@ -192,8 +202,10 @@ async function climbRungs(
     session,
     reason: silentTried
       ? 'the session is expired and the silent rung could not restore it'
-      : 'the session is expired',
-    hint: silentTried ? HINT_LOGIN : HINT_REFRESH,
+      : silentSkipped
+        ? `the session is expired and there is no browser profile in ${paths.profileDir} for the silent rung`
+        : 'the session is expired',
+    hint: silentTried || silentSkipped ? HINT_LOGIN : HINT_REFRESH,
     retryable: false,
   };
 }

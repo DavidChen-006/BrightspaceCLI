@@ -382,7 +382,7 @@ test('quizzes list skips an undecodable object with a warning; nothing decodable
   }
 });
 
-test('quizzes list: 404 on an unknown org unit → exit 5; 403 → exit 6 with the past-term hint', async () => {
+test('quizzes list: 404 on an unknown org unit → exit 5; 403 → exit 6 with the neutral denied hint', async () => {
   const { root } = seeded();
   try {
     const missing = await quizzes(root, [jsonStep(NOT_FOUND, 404)], ['list', '999', '--json']);
@@ -400,7 +400,7 @@ test('quizzes list: 404 on an unknown org unit → exit 5; 403 → exit 6 with t
     );
     assert.equal(denied.code, EXIT_CODES.permission_denied);
     assert.equal(denied.stdout, '');
-    assert.match(denied.stderr, /past-term/);
+    assert.match(denied.stderr, /denied this route/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -484,7 +484,7 @@ test('quizzes get --json emits the QuizDetail from quizzes/{quizId}', async () =
   }
 });
 
-test('quizzes get 404 → exit 5 with a list hint; 403 → exit 6 with the past-term hint', async () => {
+test('quizzes get 404 → exit 5 with a list hint; 403 → exit 6 with the neutral denied hint', async () => {
   const { root } = seeded();
   try {
     const missing = await quizzes(
@@ -504,7 +504,7 @@ test('quizzes get 404 → exit 5 with a list hint; 403 → exit 6 with the past-
     );
     assert.equal(denied.code, EXIT_CODES.permission_denied);
     assert.equal(denied.stdout, '');
-    assert.match(denied.stderr, /past-term/);
+    assert.match(denied.stderr, /denied this route/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

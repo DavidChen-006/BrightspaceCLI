@@ -53,6 +53,11 @@ const ENROLLMENTS: Enrollments = {
   PagingInfo: { Bookmark: '', HasMoreItems: false },
   Items: ALL_ENROLLMENTS.Items.slice(0, 2),
 };
+/** Five real enrollments, for the "name three and count the rest" summary. */
+const FIVE_ENROLLMENTS: Enrollments = {
+  PagingInfo: { Bookmark: '', HasMoreItems: false },
+  Items: ALL_ENROLLMENTS.Items.slice(0, 5),
+};
 const NO_ENROLLMENTS: Enrollments = {
   PagingInfo: { Bookmark: '', HasMoreItems: false },
   Items: [],
@@ -333,11 +338,10 @@ test('upcoming: one course answering 403 is summarised in one stderr line; its i
     };
     const r = await upcoming(root, routes, ['--json']);
     assert.equal(r.code, 0, r.stderr);
-    assert.equal(r.stderr, 'warning: 1 course returned 403 (past-term); details with --verbose\n');
+    // bs-6j8: the line names the course, and drops the unfounded "past-term" claim.
     assert.equal(
-      r.paths.filter((p) => p.startsWith(`${LE}/440703/`)).length,
-      1,
-      'the first 403 marks the course past-term; its remaining routes are skipped',
+      r.stderr,
+      'warning: 1 course returned 403: Scholarly Project Milestones (440703)\n',
     );
     const out = parseJson<ListOut>(r.stdout);
     assert.equal(out.count, 4);
@@ -350,17 +354,28 @@ test('upcoming: one course answering 403 is summarised in one stderr line; its i
       /GET \/d2l\/api\/le\/1\.96\/440703\/dropbox\/folders\/: HTTP 403/,
     );
 
+    assert.equal(
+      r.paths.filter((p) => p.startsWith(`${LE}/440703/`)).length,
+      1,
+      'the first 403 ends the course; its remaining routes are skipped',
+    );
+
     const verbose = await upcoming(root, routes, ['--json', '--verbose']);
     assert.equal(verbose.code, 0);
-    assert.match(verbose.stderr, /warning: 1 course returned 403 \(past-term\)/);
+    assert.match(verbose.stderr, /warning: 1 course returned 403: Scholarly Project/);
     assert.match(verbose.stderr, /440703 .*Scholarly Project Milestones.*HTTP 403/);
+    // The enrollment says the course is current, so the detail line does not blame the term.
+    assert.match(
+      verbose.stderr,
+      /The course is active; the tool is probably disabled for learners/,
+    );
     assert.equal(verbose.stderr.includes(FRESH_JWT), false, 'never the token');
 
     const both = await upcoming(root, { ...routes, [folders(412690)]: [FORBIDDEN] }, ['--json']);
     assert.equal(both.code, 0, both.stderr);
     assert.equal(
       both.stderr,
-      'warning: 2 courses returned 403 (past-term); details with --verbose\n',
+      'warning: 2 courses returned 403: Purdue Civics Knowledge Test (412690), Scholarly Project Milestones (440703)\n',
     );
     assert.equal(parseJson<ListOut>(both.stdout).count, 1, 'only the content item is left');
   } finally {
@@ -377,15 +392,14 @@ test('upcoming: every course 403 → exit 0 with an empty list (3 under --fail-e
     };
     const r = await upcoming(root, routes, ['--json'], {}, FORBIDDEN);
     assert.equal(r.code, 0, r.stderr);
-    assert.equal(r.stderr, 'warning: 2 courses returned 403 (past-term); details with --verbose\n');
+    assert.equal(
+      r.stderr,
+      'warning: 2 courses returned 403: Purdue Civics Knowledge Test (412690), Scholarly Project Milestones (440703)\n',
+    );
     const out = parseJson<ListOut>(r.stdout);
     assert.deepEqual(out.items, []);
     assert.equal(out.failures.length, 2);
-    assert.equal(
-      r.paths.length,
-      4,
-      'enrollments, one route per past-term course, the content chunk',
-    );
+    assert.equal(r.paths.length, 4, 'enrollments, one route per denied course, the content chunk');
 
     const empty = await upcoming(root, routes, ['--json', '--fail-empty'], {}, FORBIDDEN);
     assert.equal(empty.code, EXIT_CODES.empty_results);
@@ -394,6 +408,44 @@ test('upcoming: every course 403 → exit 0 with an empty list (3 under --fail-e
     const human = await upcoming(root, healthy(), ['--days', '1']);
     assert.equal(human.code, 0, human.stderr);
     assert.match(human.stdout, /Nothing due in the next 1 day/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('upcoming: more than three denied courses names three and counts the rest (bs-6j8)', async () => {
+  const { root } = seeded();
+  try {
+    const routes = {
+      [ENROLLMENTS_PATH]: [jsonStep(FIVE_ENROLLMENTS)],
+      [MY_ITEMS_PATH]: [jsonStep(EMPTY_PAGE)],
+    };
+    const r = await upcoming(root, routes, ['--json'], {}, FORBIDDEN);
+    assert.equal(r.code, 0, r.stderr);
+    assert.equal(
+      r.stderr,
+      'warning: 5 courses returned 403: Purdue Civics Knowledge Test (412690), ' +
+        'Scholarly Project Milestones (440703), Fall 2024 CGT 11800-013 LEC (1092755) ' +
+        'and 2 more; details with --verbose\n',
+    );
+    const out = parseJson<ListOut>(r.stdout);
+    assert.equal(out.failures.length, 5, 'the JSON failures array is unchanged');
+    assert.deepEqual(
+      out.failures.map((f) => f.courseId),
+      [412690, 440703, 1092755, 1095299, 1095315],
+    );
+
+    // --select projects the items; failures is envelope metadata and survives.
+    const selected = await upcoming(root, routes, ['--json', '--select', 'id'], {}, FORBIDDEN);
+    assert.equal(selected.code, 0, selected.stderr);
+    const projected = parseJson<ListOut>(selected.stdout);
+    assert.equal(projected.failures.length, 5);
+    assert.equal(projected.failures[0]?.status, 403);
+
+    // A course whose term is over is named as such under --verbose.
+    const verbose = await upcoming(root, routes, ['--json', '--verbose'], {}, FORBIDDEN);
+    assert.match(verbose.stderr, /1092755 .*This course ended on 2024-12-29; 403 is normal/);
+    assert.match(verbose.stderr, /412690 .*The course is active; the tool is probably disabled/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

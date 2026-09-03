@@ -228,7 +228,7 @@ test('assignments list with no folders: exit 0 and an empty envelope; --fail-emp
   }
 });
 
-test('assignments list: a non-array 200 body is a shape error (exit 1); 404 → 5; 403 → 6 past-term', async () => {
+test('assignments list: a non-array 200 body is a shape error (exit 1); 404 → 5; 403 → 6 permission denied', async () => {
   const { root } = seeded();
   try {
     const shape = await assignments(root, [jsonStep(NOT_FOUND_BODY)], ['list', '440703', '--json']);
@@ -252,7 +252,7 @@ test('assignments list: a non-array 200 body is a shape error (exit 1); 404 → 
     );
     assert.equal(denied.code, EXIT_CODES.permission_denied);
     assert.equal(denied.stdout, '');
-    assert.match(denied.stderr, /past-term/);
+    assert.match(denied.stderr, /denied this route/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -371,7 +371,7 @@ test('assignments get --json: the single-folder route, Item + instructions/attac
   }
 });
 
-test('assignments get 404 → exit 5 with a list hint; 403 → exit 6 with the past-term hint', async () => {
+test('assignments get 404 → exit 5 with a list hint; 403 → exit 6 with the neutral denied hint', async () => {
   const { root } = seeded();
   try {
     const missing = await assignments(
@@ -391,7 +391,7 @@ test('assignments get 404 → exit 5 with a list hint; 403 → exit 6 with the p
     );
     assert.equal(denied.code, EXIT_CODES.permission_denied);
     assert.equal(denied.stdout, '');
-    assert.match(denied.stderr, /past-term/);
+    assert.match(denied.stderr, /denied this route/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -790,7 +790,7 @@ test('assignments download 404 → exit 5 with a hint naming get/submissions; 40
       ['download', '1092755', '5', '6', '--out', out, '--json'],
     );
     assert.equal(denied.code, EXIT_CODES.permission_denied);
-    assert.match(denied.stderr, /past-term/);
+    assert.match(denied.stderr, /denied this route/);
     assert.deepEqual(readdirSync(out), [], 'directory left empty');
   } finally {
     rmSync(root, { recursive: true, force: true });

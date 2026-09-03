@@ -391,7 +391,7 @@ test('announcements list skips an undecodable item with a warning; a non-array p
   }
 });
 
-test('announcements list: 404 → exit 5; 403 → exit 6 with the past-term hint', async () => {
+test('announcements list: 404 → exit 5; 403 → exit 6 with the neutral denied hint', async () => {
   const { root } = seeded();
   try {
     const missing = await news(root, [jsonStep(NOT_FOUND_BODY, 404)], ['list', '999', '--json']);
@@ -402,7 +402,7 @@ test('announcements list: 404 → exit 5; 403 → exit 6 with the past-term hint
     const denied = await news(root, [{ status: 403, body: 'Not authorized' }], ['list', '1092755']);
     assert.equal(denied.code, EXIT_CODES.permission_denied);
     assert.equal(denied.stdout, '');
-    assert.match(denied.stderr, /past-term/);
+    assert.match(denied.stderr, /denied this route/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -505,7 +505,7 @@ test('announcements get: unknown id → exit 5 with a hint; draft ids are not an
       ['get', '1092755', '1'],
     );
     assert.equal(denied.code, EXIT_CODES.permission_denied);
-    assert.match(denied.stderr, /past-term/);
+    assert.match(denied.stderr, /denied this route/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -813,7 +813,7 @@ test('announcements download: a failing stream maps like any route (404 → 5, 4
       ['download', '412690', '1386315', '--out', out, '--json'],
     );
     assert.equal(denied.code, EXIT_CODES.permission_denied);
-    assert.match(denied.stderr, /past-term/);
+    assert.match(denied.stderr, /denied this route/);
 
     const broken: Step = async () => ({
       status: 200,

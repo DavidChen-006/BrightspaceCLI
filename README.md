@@ -51,11 +51,16 @@ data.
 ## Install
 
 ```sh
-git clone <this repo> && cd BrightspaceCLI
+git clone https://github.com/DavidChen-006/BrightspaceCLI.git && cd BrightspaceCLI
+# or, over SSH:  git clone git@github.com:DavidChen-006/BrightspaceCLI.git && cd BrightspaceCLI
 npm ci
 npm run build
 npm link            # puts `bs` (and `brightspace`) on your PATH
 ```
+
+`npm link` installs global `bs` and `brightspace` command links into your npm prefix (so it can
+shadow an existing `bs`, and it needs that prefix to be writable); `npm unlink -g brightspace-cli`
+removes them again.
 
 Without linking, `node dist/bin/bs.js <args>` is identical, and `npx .` runs the local package. To
 hack on it without building, `npm run dev -- <args>` runs from source through `tsx`.
@@ -196,7 +201,28 @@ Lists come back in an envelope — `items`, `count`, `fetchedAt`:
 ```
 
 `bs courses get` adds `path`, `description`, `descriptionHtml`, `semester` and `department` (each
-`{id, name, code}` or `null`) to the same keys. A failing second call costs only its fields.
+`{id, name, code}` or `null`) to the same keys, plus `partial` and `failures` so a script never has
+to read stderr to know the record is complete:
+
+```json
+{
+  "id": 1631402, "name": "Fall 2026 CS 21100-CP1 LEC", "code": "wl.202710.CS.21100.CP1",
+  "role": "Learner", "isActive": true, "canAccess": true,
+  "startDate": "2026-08-24T04:00:00Z", "endDate": "2026-12-19T04:59:00Z",
+  "homeUrl": null, "url": "https://purdue.brightspace.com/d2l/home/1631402",
+  "path": null, "description": null, "descriptionHtml": null,
+  "semester": null, "department": null,
+  "partial": true,
+  "failures": [
+    { "route": "GET /d2l/api/lp/1.62/courses/1631402", "status": 403,
+      "message": "GET /d2l/api/lp/1.62/courses/1631402: HTTP 403: Not Authorized" }
+  ]
+}
+```
+
+On full success the same keys are `"partial": false` and `"failures": []`, so the shape never
+changes. The `courses/(ou)` call failing costs only its own fields — `path`, `description`,
+`descriptionHtml`, `semester`, `department` — and still exits `0` with a warning on stderr.
 
 ### What is due soon
 
@@ -208,7 +234,15 @@ bs upcoming --course 412690 --course 440703 --limit 20 --json
 
 `bs upcoming` fans out over your active courses (assignment folders, quizzes, discussion topics and
 the `content/myItems/due/` route), merges, dedupes and sorts by due date. Per-course failures are
-never fatal: they land in a `failures` array, and past-term 403s are summarised in one stderr line.
+never fatal: they land in a `failures` array — which survives `--select`, since it is envelope
+metadata — and 403s are summarised in one stderr line that names the courses:
+
+```text
+warning: 1 course returned 403: Fall 2026 CS 21100-CP1 LEC (1631402)
+```
+
+Past the third course the line names three and counts the rest (`… and 4 more; details with
+--verbose`). `--verbose` adds a line per course, with the reason where `bs` can tell it.
 
 ```json
 {
@@ -452,7 +486,7 @@ neither output flag was given.
 | 3 | `empty_results` | a list returned nothing and `--fail-empty` was given (output still written) |
 | 4 | `auth_required` | no session, the silent rung failed, `--no-input` suppressed a login, or a 401 survived one re-mint |
 | 5 | `not_found` | HTTP 404 (except the documented "no grades yet" 404s) |
-| 6 | `permission_denied` | HTTP 403 on a data route: a past-term course, or a route closed to learners |
+| 6 | `permission_denied` | HTTP 403 on a data route: a route closed to your role, or a past-term course |
 | 7 | `rate_limited` | HTTP 429 after retries |
 | 8 | `retryable` | HTTP 5xx after retry, network error, timeout, DNS/TLS |
 | 10 | `config` | root not writable, browser missing and install declined, unsupported LP/LE version, bad base URL |
@@ -572,11 +606,15 @@ exits `4`, the Entra cookie in `profile/` has expired and a human must run `bs a
 **A data command exits 4 mid-script.** The tenant answered `sessionExpired=1` or a 401. `bs`
 re-mints and re-runs the silent rung once automatically; exit `4` means even that failed.
 
-**Exit 6 on some courses — this is normal.** Brightspace answers HTTP 403 for courses whose term has
-ended, even though they still appear in your enrollments. `bs upcoming` treats it as expected and
-prints one stderr line (`N courses returned 403 (past-term); details with --verbose`) instead of
-failing. For a single command, pick a current course: `bs courses list` hides ended courses by
-default.
+**Exit 6 (`403`) on a course route.** Two different things look the same. The course's term has
+ended — common, since ended courses stay in your enrollments — or the course is current but the
+tool is closed to your role (a discussion area with no learner access, say). The hint is neutral
+for that reason: `Brightspace denied this route (HTTP 403). Your role may lack this permission in
+this course, or the course may be past-term.` Where `bs` already holds the enrollment it says
+which: `bs courses get <ou>` and `bs upcoming --verbose` add either `This course ended on <date>;
+403 is normal after the term.` or `The course is active; the tool is probably disabled for learners
+here.` `bs upcoming` never fails on a 403 — it names the courses on stderr and carries them in
+`failures` — and `bs courses list` hides ended courses by default.
 
 **The browser is missing.** Run `bs auth doctor`; it names the exact command
 (`node node_modules/playwright-core/cli.js install chromium`, ~300 MB) and `--install-browser` runs

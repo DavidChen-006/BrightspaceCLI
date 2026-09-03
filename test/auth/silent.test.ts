@@ -15,6 +15,7 @@ import {
   fakeSession,
   mintOkStep,
   secretsOf,
+  seedProfile,
   tempRoot,
 } from '../helpers/auth.js';
 import {
@@ -212,6 +213,8 @@ function ladderHarness(steps: Step[]) {
     clock: () => NOW,
   });
   const root = tempRoot();
+  // climb() only runs the silent rung when profile/ holds something (bs-6j8).
+  seedProfile(root.paths);
   return { ft, lg, http, root, done: () => rmSync(root.root, { recursive: true, force: true }) };
 }
 
@@ -261,6 +264,7 @@ test('ladder: expired session, silent rung meets an email prompt → exit 4 with
   const { root, paths } = tempRoot();
   try {
     writeSession(paths, fakeSession());
+    seedProfile(paths);
     const before = readFileSync(paths.sessionFile, 'utf8');
     const fb = new FakeBrowser([loginSurface('email'), emailSurface()], { now: NOW });
     const ft = fakeTransport([expiredStubStep]);

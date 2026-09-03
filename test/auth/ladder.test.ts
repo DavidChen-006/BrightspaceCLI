@@ -15,7 +15,7 @@ import {
 import { readSession, type Session, writeSession } from '../../src/auth/session.js';
 import { createContext } from '../../src/cli/context.js';
 import { DEFAULT_CONFIG } from '../../src/core/config.js';
-import { AuthRequiredError, RetryableError } from '../../src/core/errors.js';
+import { AuthRequiredError, EXIT_CODES, RetryableError } from '../../src/core/errors.js';
 import { createHttp, type HttpClient } from '../../src/core/http/index.js';
 import {
   assertNoSecrets,
@@ -24,8 +24,10 @@ import {
   fakeSession,
   mintOkStep,
   secretsOf,
+  seedProfile,
   tempRoot,
 } from '../helpers/auth.js';
+import { runCli } from '../helpers/cli.js';
 import { collectLog, fakeSleep, fakeTransport, jsonStep, type Step } from '../helpers/http.js';
 
 const NOW = Date.parse('2026-09-02T10:00:00Z');
@@ -44,6 +46,8 @@ function harness(steps: Step[]) {
     clock: () => NOW,
   });
   const { root, paths } = tempRoot();
+  // Every rung test below drives a silent rung, which climb() only runs when a profile exists.
+  seedProfile(paths);
   const input = {
     paths,
     http,
@@ -261,6 +265,113 @@ test('the full rung is skipped unless allowFull, and used when allowed', async (
   }
 });
 
+// ---------------------------------------------------------------------------------------------
+// The silent rung's fail-fast gate (bs-6j8): no profile means no Chromium launch
+// ---------------------------------------------------------------------------------------------
+
+test('the silent rung is skipped when profile/ is missing or empty, and run when it holds a file', async () => {
+  const { root, paths } = tempRoot();
+  const lg = collectLog();
+  const http = createHttp({ transport: fakeTransport([]).transport, sleep: fakeSleep().sleep });
+  const input = { paths, http, config: DEFAULT_CONFIG, log: lg.log, now: () => NOW };
+  try {
+    const silent = rung('silent', async () => fakeSession());
+
+    // No profile/ at all.
+    assert.equal(existsSync(paths.profileDir), false);
+    const missing = await climb({ ...input, rungs: [silent.rung] });
+    assert.equal(silent.calls.length, 0, 'no rung attempt, so no browser launch');
+    assert.equal(missing.state, 'none');
+    if (missing.state === 'none') assert.equal(missing.hint, HINT_LOGIN);
+    assert.equal(statusOf(paths).state, 'none', 'status.json is still written');
+    assert.ok(
+      lg.lines.some((l) => /skipping rung 1 \(silent\)/.test(l)),
+      lg.lines.join('\n'),
+    );
+
+    // An empty profile/ is not a profile either.
+    mkdirSync(paths.profileDir, { recursive: true });
+    const empty = await climb({ ...input, rungs: [silent.rung] });
+    assert.equal(silent.calls.length, 0);
+    assert.equal(empty.state, 'none');
+    assert.equal(statusOf(paths).state, 'none');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a profile holding a file opens the gate: the silent rung runs and restores the session', async () => {
+  const { root, paths } = tempRoot();
+  const ft = fakeTransport([mintOkStep(NEW_JWT)]);
+  const lg = collectLog();
+  const http = createHttp({ transport: ft.transport, sleep: fakeSleep().sleep });
+  try {
+    seedProfile(paths);
+    const silent = rung('silent', async () => fakeSession());
+    const result = await climb({
+      paths,
+      http,
+      config: DEFAULT_CONFIG,
+      log: lg.log,
+      now: () => NOW,
+      rungs: [silent.rung],
+    });
+    assert.equal(silent.calls.length, 1);
+    assert.equal(result.state, 'fresh');
+    if (result.state === 'fresh') assert.equal(result.rungUsed, 'silent');
+    assert.equal(statusOf(paths).state, 'fresh');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('an expired session with no profile reports the login hint, not a pointless auth refresh', async () => {
+  const { root, paths } = tempRoot();
+  const ft = fakeTransport([expiredStubStep]);
+  const lg = collectLog();
+  const http = createHttp({ transport: ft.transport, sleep: fakeSleep().sleep });
+  try {
+    writeSession(paths, fakeSession());
+    const silent = rung('silent', async () => fakeSession());
+    const result = await climb({
+      paths,
+      http,
+      config: DEFAULT_CONFIG,
+      log: lg.log,
+      now: () => NOW,
+      rungs: [silent.rung],
+    });
+    assert.equal(silent.calls.length, 0);
+    assert.equal(result.state, 'expired');
+    if (result.state === 'expired') {
+      assert.equal(result.hint, HINT_LOGIN);
+      assert.match(result.reason, /no browser profile/);
+    }
+    assert.notEqual(HINT_LOGIN, HINT_REFRESH);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a data command on an empty root exits 4 without invoking any rung', async () => {
+  const { root } = tempRoot();
+  try {
+    const silent = rung('silent', async () => fakeSession());
+    const ft = fakeTransport([]);
+    const r = await runCli(['--root', root, 'whoami', '--json', '--no-input'], {
+      transport: ft.transport,
+      rungs: [silent.rung],
+    });
+    assert.equal(r.code, EXIT_CODES.auth_required);
+    assert.equal(r.stdout, '');
+    assert.ok(r.stderr.includes(HINT_LOGIN), r.stderr);
+    assert.equal(silent.calls.length, 0, 'no browser rung is attempted');
+    assert.equal(ft.calls.length, 0, 'and no request is made');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('a rung that throws or returns null is a failed rung; the ladder continues in order', async () => {
   const h = harness([expiredStubStep, mintOkStep(NEW_JWT)]);
   try {
@@ -419,6 +530,7 @@ test('authorizedHttp: expired session after the registered rungs fail throws Aut
   const { root, paths } = tempRoot();
   try {
     writeSession(paths, fakeSession());
+    seedProfile(paths);
     const silent = rung('silent', async () => null);
     const { ctx } = cliContext(root, [expiredStubStep], [silent.rung]);
     await assert.rejects(authorizedHttp(ctx, { now: () => NOW }), (err: unknown) => {
