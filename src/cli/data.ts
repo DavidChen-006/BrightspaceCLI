@@ -57,7 +57,7 @@ export function withData<T>(
 /**
  * One route that failed inside an otherwise successful result. Both strings are composed by
  * `bs` (a method and a path, the classifier's diagnosis line), never by the tenant, so
- * `--wrap-untrusted` leaves them alone — see METADATA_KEYS_BY_ANCESTOR in `src/core/output.ts`.
+ * `--wrap-untrusted` leaves them alone — see METADATA_KEYS_BY_PARENT in `src/core/output.ts`.
  */
 export interface RouteFailure {
   /** `GET /d2l/api/lp/1.62/courses/1498777`. */

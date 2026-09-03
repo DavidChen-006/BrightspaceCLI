@@ -11,7 +11,8 @@
  * its remaining routes are skipped. Denied courses are NAMED in ONE stderr line (the first three,
  * then a count), with per-course detail — and `forbiddenNote()`'s diagnosis — under --verbose;
  * other failures warn one line each. The command only fails when nothing at all succeeded and no
- * course was denied (then the first error is reported), or on auth/cancellation. `src/d2l/upcoming.ts` owns the window/dedupe/sort.
+ * course was denied (then the first error is reported), or on auth/cancellation.
+ * `src/d2l/upcoming.ts` owns the window/dedupe/sort.
  */
 import { type Command, InvalidArgumentError, Option } from 'commander';
 import type { TenantConfig } from '../../core/config.js';
