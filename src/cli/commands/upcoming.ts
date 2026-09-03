@@ -7,22 +7,15 @@
  * sequence so the pool bound is the number of requests in flight) or one
  * `content/myItems/due/?orgUnitIdsCSV=` chunk of at most 100 courses. Every unit isolates its
  * failures: a route failing costs only its items and lands in the envelope's `failures`; the
- * first 403 marks a course past-term (Brightspace-Bar sweep: 403 is the steady state on 25/27
- * courses) and its remaining routes are skipped. Past-term courses are summarised in ONE stderr
- * line, with per-course detail under --verbose; other failures warn one line each. The command
- * only fails when nothing at all succeeded and no course was past-term (then the first error is
- * reported), or on auth/cancellation. `src/d2l/upcoming.ts` owns the window/dedupe/sort.
+ * first 403 ends a course (Brightspace-Bar sweep: 403 is the steady state on 25/27 courses) and
+ * its remaining routes are skipped. Denied courses are NAMED in ONE stderr line (the first three,
+ * then a count), with per-course detail — and `forbiddenNote()`'s diagnosis — under --verbose;
+ * other failures warn one line each. The command only fails when nothing at all succeeded and no
+ * course was denied (then the first error is reported), or on auth/cancellation. `src/d2l/upcoming.ts` owns the window/dedupe/sort.
  */
 import { type Command, InvalidArgumentError, Option } from 'commander';
 import type { TenantConfig } from '../../core/config.js';
-import {
-  AuthRequiredError,
-  BsError,
-  CancelledError,
-  NotFoundError,
-  PermissionDeniedError,
-  RateLimitedError,
-} from '../../core/errors.js';
+import { AuthRequiredError, BsError, CancelledError } from '../../core/errors.js';
 import { boundedPool, collect, type HttpClient } from '../../core/http/index.js';
 import { type Column, Table } from '../../core/output.js';
 import { type Assignment, assignmentOf, listFolders } from '../../d2l/assignments.js';
@@ -49,7 +42,7 @@ import {
   type UpcomingKind,
 } from '../../d2l/upcoming.js';
 import type { CliContext } from '../context.js';
-import { emitList, listEnvelope, withData } from '../data.js';
+import { emitList, forbiddenNote, httpStatusOf, listEnvelope, withData } from '../data.js';
 import { parsePositiveInt, typed } from '../options.js';
 import { parseOrgUnit } from './courses.js';
 
@@ -88,6 +81,9 @@ interface UpcomingOptions {
 interface CourseRef {
   id: number;
   name: string | null;
+  /** From the enrollment, for `forbiddenNote()`; unknown under `--course` (no listing).  */
+  endDate: string | null;
+  isActive: boolean;
 }
 
 type Unit = { kind: 'course'; course: CourseRef } | { kind: 'content'; ids: number[] };
@@ -109,6 +105,8 @@ interface Fetched {
   result: ReturnType<typeof mergeUpcoming>;
   ok: number;
   firstError: BsError | null;
+  /** Each fanned-out course's access window, so a 403 can be explained (bs-6j8). */
+  terms: Map<number, { endDate: string | null; isActive: boolean }>;
 }
 
 function emptyResult(): UnitResult {
@@ -130,20 +128,11 @@ function isFatal(err: unknown): boolean {
   );
 }
 
-/** The HTTP status behind a classified route error, when there was one. */
-export function statusOf(err: BsError): number | null {
-  if (err instanceof PermissionDeniedError) return 403;
-  if (err instanceof NotFoundError) return 404;
-  if (err instanceof RateLimitedError) return 429;
-  const m = /HTTP (\d{3})/.exec(err.message);
-  return m ? Number(m[1]) : null;
-}
-
 function failureOf(err: BsError, course: CourseRef | null): UpcomingFailure {
   return {
     courseId: course?.id ?? null,
     courseName: course?.name ?? null,
-    status: statusOf(err),
+    status: httpStatusOf(err),
     message: err.message,
   };
 }
@@ -249,7 +238,7 @@ export function register(program: Command, ctx: CliContext): void {
   program
     .command('upcoming')
     .description(
-      'Everything due soon across your active courses: assignments, quizzes, discussion topics and content items with a due date in the window, sorted by due date. Courses that answer 403 (past-term) are summarised on stderr, never fatal.',
+      'Everything due soon across your active courses: assignments, quizzes, discussion topics and content items with a due date in the window, sorted by due date. Courses that answer 403 are named on one stderr line and land in failures, never fatal.',
     )
     .addOption(
       typed(
@@ -295,16 +284,31 @@ export function register(program: Command, ctx: CliContext): void {
       const fetched = await withData(ctx, async (http, cfg): Promise<Fetched> => {
         let courses: CourseRef[];
         if (opts.course !== undefined && opts.course.length > 0) {
-          courses = [...new Set(opts.course)].map((id) => ({ id, name: null }));
+          courses = [...new Set(opts.course)].map((id) => ({
+            id,
+            name: null,
+            endDate: null,
+            isActive: false,
+          }));
         } else {
           const enrollments = await collect(listEnrollments(http, cfg, { now }, page));
           courses = enrollments
             .map((e) => courseOf(e, cfg.baseUrl))
             .filter((c): c is NonNullable<typeof c> => c !== null)
-            .map((c) => ({ id: c.id, name: c.name === '' ? null : c.name }));
+            .map((c) => ({
+              id: c.id,
+              name: c.name === '' ? null : c.name,
+              endDate: c.endDate,
+              isActive: c.isActive,
+            }));
           if (courses.length === 0) {
             ctx.warn('no active course in your enrollments; nothing to look for');
-            return { result: mergeUpcoming({}, { now, days }), ok: 0, firstError: null };
+            return {
+              result: mergeUpcoming({}, { now, days }),
+              ok: 0,
+              firstError: null,
+              terms: new Map(),
+            };
           }
         }
         const courseNames = new Map(courses.map((c) => [c.id, c.name]));
@@ -337,22 +341,29 @@ export function register(program: Command, ctx: CliContext): void {
         return {
           result: mergeUpcoming(merged, { now, days }, courseNames),
           ok: merged.ok,
-          firstError: merged.errors.find((e) => statusOf(e) !== 403) ?? null,
+          firstError: merged.errors.find((e) => httpStatusOf(e) !== 403) ?? null,
+          terms: new Map(courses.map((c) => [c.id, { endDate: c.endDate, isActive: c.isActive }])),
         };
       });
 
       const { result } = fetched;
-      const pastTerm = new Set(result.failures.filter((f) => isPastTerm(f)).map((f) => f.courseId));
-      const others = result.failures.filter((f) => !isPastTerm(f));
-      if (fetched.ok === 0 && pastTerm.size === 0 && fetched.firstError !== null) {
+      const denied = deniedCourses(result.failures);
+      const others = result.failures.filter((f) => !isCourseDenied(f));
+      if (fetched.ok === 0 && denied.size === 0 && fetched.firstError !== null) {
         throw fetched.firstError;
       }
-      if (pastTerm.size > 0) {
+      if (denied.size > 0) {
+        // Named, not just counted (bs-6j8): "1 course returned 403" left the user re-running
+        // the whole command under --verbose to find out whether a course they cared about
+        // was skipped.
         ctx.warn(
-          `${pastTerm.size} course${pastTerm.size === 1 ? '' : 's'} returned 403 (past-term); details with --verbose`,
+          `${denied.size} course${denied.size === 1 ? '' : 's'} returned 403: ${namedCourses([...denied.values()])}`,
         );
         for (const f of result.failures) {
-          if (isPastTerm(f)) ctx.debug(`  ${f.courseId} ${f.courseName ?? ''}: ${f.message}`);
+          if (!isCourseDenied(f)) continue;
+          const term = f.courseId === null ? undefined : fetched.terms.get(f.courseId);
+          const note = term === undefined ? null : forbiddenNote(term);
+          ctx.debug(`  ${f.courseId} ${f.courseName ?? ''}: ${f.message}${note ? ` ${note}` : ''}`);
         }
       }
       for (const f of others) {
@@ -372,7 +383,29 @@ export function register(program: Command, ctx: CliContext): void {
     });
 }
 
-/** A 403 on a course route: past-term (a chunk 403 has no course and is reported on its own). */
-function isPastTerm(f: UpcomingFailure): boolean {
+/** A 403 on a course route (a chunk 403 has no course and is reported on its own). */
+function isCourseDenied(f: UpcomingFailure): boolean {
   return f.status === 403 && f.courseId !== null;
+}
+
+/** The denied courses in failure order, one label each: `Name (id)`, or `course <id>` unnamed. */
+function deniedCourses(failures: readonly UpcomingFailure[]): Map<number, string> {
+  const out = new Map<number, string>();
+  for (const f of failures) {
+    if (!isCourseDenied(f) || f.courseId === null || out.has(f.courseId)) continue;
+    out.set(
+      f.courseId,
+      f.courseName === null ? `course ${f.courseId}` : `${f.courseName} (${f.courseId})`,
+    );
+  }
+  return out;
+}
+
+/** How many course names one stderr line carries before it starts counting instead. */
+const NAMED_DENIED_LIMIT = 3;
+
+function namedCourses(labels: readonly string[]): string {
+  if (labels.length <= NAMED_DENIED_LIMIT) return labels.join(', ');
+  const rest = labels.length - NAMED_DENIED_LIMIT;
+  return `${labels.slice(0, NAMED_DENIED_LIMIT).join(', ')} and ${rest} more; details with --verbose`;
 }

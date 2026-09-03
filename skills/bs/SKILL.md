@@ -99,7 +99,7 @@ and arguments. Every list and get command also accepts the global output flags a
 | `bs quizzes list` | List the quizzes the caller may see in a course. Follows Next paging. |
 | `bs schema` | Print the machine-readable command contract (always JSON) |
 | `bs skill` | Print the agent SKILL.md rendered from the live command schema. --check compares it with the committed skills/bs/SKILL.md and exits 1 when it is stale. |
-| `bs upcoming` | Everything due soon across your active courses: assignments, quizzes, discussion topics and content items with a due date in the window, sorted by due date. Courses that answer 403 (past-term) are summarised on stderr, never fatal. |
+| `bs upcoming` | Everything due soon across your active courses: assignments, quizzes, discussion topics and content items with a due date in the window, sorted by due date. Courses that answer 403 are named on one stderr line and land in failures, never fatal. |
 | `bs version` | Print version, commit and build date |
 | `bs whoami` | Show the signed-in user (id, names, username, pronouns) |
 

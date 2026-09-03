@@ -125,10 +125,11 @@ sections your ticket cites before writing code.
   requests in flight) plus one `content/myItems/due/?orgUnitIdsCSV=` unit per chunk of <=100
   courses; `--kinds` drops the routes of the kinds not asked for. Every route is isolated: a failure
   costs only its items and lands in the envelope's `failures[{courseId, courseName, status,
-  message}]` (`courseId` null for a content chunk). The first 403 marks a course past-term and
-  skips its remaining routes; past-term courses are ONE stderr line (`N courses returned 403
-  (past-term); details with --verbose`, per-course lines under `--verbose`), other failures warn
-  one line each. The command only fails when no route at all answered and no course was past-term
+  message}]` (`courseId` null for a content chunk). The first 403 ends a course and skips its
+  remaining routes; denied courses are ONE stderr line that NAMES them (bs-6j8: `N course(s)
+  returned 403: Name (id), …`, and past the third `… and N more; details with --verbose`), with
+  per-course lines plus `forbiddenNote()`'s diagnosis under `--verbose`; other failures warn one
+  line each. The command only fails when no route at all answered and no course was denied
   (then the first error is rethrown), on auth (a 401 re-mints once through `withData`) or
   cancellation; every course 403 is exit 0 with an empty list (3 under `--fail-empty`).
   `mergeUpcoming` keeps items due in `[now, now + days]`, dedupes by `(kind, id)`, sorts by

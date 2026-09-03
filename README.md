@@ -229,7 +229,15 @@ bs upcoming --course 412690 --course 440703 --limit 20 --json
 
 `bs upcoming` fans out over your active courses (assignment folders, quizzes, discussion topics and
 the `content/myItems/due/` route), merges, dedupes and sorts by due date. Per-course failures are
-never fatal: they land in a `failures` array, and past-term 403s are summarised in one stderr line.
+never fatal: they land in a `failures` array — which survives `--select`, since it is envelope
+metadata — and 403s are summarised in one stderr line that names the courses:
+
+```text
+warning: 1 course returned 403: Fall 2026 CS 21100-CP1 LEC (1631402)
+```
+
+Past the third course the line names three and counts the rest (`… and 4 more; details with
+--verbose`). `--verbose` adds a line per course, with the reason where `bs` can tell it.
 
 ```json
 {
